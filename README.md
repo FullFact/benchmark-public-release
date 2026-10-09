@@ -36,3 +36,5 @@ Run the extraction script:
 `uv run python scripts/demo_extract.py`
 
 If you have access to the Gemini API, you should see a list of extracted atoms. 
+
+During the annotation period, the `run_for_day()` in `runner.py` was executed every day after the chatbot responses had been gathered. The resulting atomic facts, groups and source URLs were shown to the annotators in a simple UI.
