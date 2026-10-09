@@ -1,5 +1,6 @@
 # benchmark-public-release
-A public repository for sharing code and data from the Full Fact AI Trust Benchmark
+A public repository for sharing code and data from the Full Fact AI Trust Benchmark. The report itself can be found at [fullfact.org/ai-benchmark](https://fullfact.org/ai-benchmark/).
+
 
 ## Report 1 (October 2026)
 
