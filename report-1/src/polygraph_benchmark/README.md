@@ -14,7 +14,7 @@ and then score each model's responses.
 2. **Deduplication** (`consistency.find_repeated_atoms`, `deduplication.py`): each new
    atom is compared with earlier atoms for the same question. A fast bi-encoder finds
    candidates. Near-identical text is accepted outright. Other candidates must agree
-   on entities and numbers (`numbers.py`) and then pass a cross-encoder check. Each atom
+   on entities and numbers (`parse_numbers.py`) and then pass a cross-encoder check. Each atom
    is linked to its earliest match, preferring matches from the same model.
 3. **Source extraction** (`source_analysis.py`): URLs cited in each response.
 4. **Scoring** (`auto_marker.py`, `consistency.py`): atoms are matched against

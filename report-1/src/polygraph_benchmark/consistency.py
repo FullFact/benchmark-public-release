@@ -15,7 +15,7 @@ from datetime import date, timedelta
 from api.models import Point
 from api.service import MarkingSchemeService, PolygraphResponseService
 from polygraph_benchmark.deduplication import check_entity_match, get_earliest_matches
-from polygraph_benchmark.numbers import check_number_match
+from polygraph_benchmark.parse_numbers import check_number_match
 
 logger = logging.getLogger(__name__)
 
