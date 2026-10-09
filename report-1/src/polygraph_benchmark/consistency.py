@@ -111,7 +111,7 @@ def find_repeated_atoms(day_to_process: date) -> None:
         start_time = time.monotonic()
         q_text: str = question["question"]
         logger.info(
-            f"MATCHES: Finding matches for question {i+1}/{len(questions)}: {q_text}"
+            f"MATCHES: Finding matches for question {i + 1}/{len(questions)}: {q_text}"
         )
         earliest_matches = get_existing_matches_for_question(q_text, day_to_process)
         for current_new, current_known in earliest_matches.items():
@@ -119,14 +119,6 @@ def find_repeated_atoms(day_to_process: date) -> None:
                 service.mark_as_repeat(current_new, current_known)
         end_time = time.monotonic()
         logger.info(f"MATCHES: Completed in {end_time - start_time:.2f}s")
-
-
-        # else:
-        #     print(
-        #         f"  {point.response_time:%Y-%m-%d %H:%M} "
-        #         f"{point.atomic_fact} "
-        #         f"(new)"
-        #     )
 
 
 def group_atoms_by_repeats(

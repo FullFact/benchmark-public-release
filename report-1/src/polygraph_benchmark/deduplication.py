@@ -1,3 +1,5 @@
+"""Main entry point: get_earliest_matches()"""
+
 import logging
 import re
 from collections.abc import Callable
@@ -167,12 +169,12 @@ def get_earliest_matches(
 ) -> dict[Point, Point | None]:
     """
     Finds earliest matching known point for each provided point.
-    Does a filter across all pairs with a quick model.
-    Takes any pairs whose text is near identical as matches from there,
-    skipping the filters and the more thorough check.
-    Then applies any specified filters to the remaining pairs.
-    Then does a more thorough check on those with a more complex model.
-    Finally filters down to only keep one match per atom.
+    Does a filter across all pairs with a quick model (pairwise cosine
+    similarity). Takes any pairs whose text is near-identical as matches from
+    there, skipping the filters and the more thorough check. Then applies any
+    specified filters to the remaining pairs. Then does a more thorough check
+    on those with a more complex cross-encoding model. Finally filters down
+    to only keep one match per atom.
     """
     if not new_points or not known_points:
         return {point: None for point in new_points}

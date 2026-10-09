@@ -9,7 +9,6 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
-# from genai_utils import gemini
 from google import genai
 from google.genai import types
 from pydantic import BaseModel

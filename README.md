@@ -21,7 +21,7 @@ to extract `data/benchmark-2026-07-13-to-2026-09-22-filtered.sqlite`
 
 Now you can run the first demo script:
 
-`uv run python scripts/demo_reports.py`
+`uv run python scripts/demo_data_reports.py`
 
 You should then see the list of questions we analysed and an example of a chatbot response. The data is read from the local archived sqlite database.
 
