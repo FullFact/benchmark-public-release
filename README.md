@@ -4,7 +4,7 @@ A public repository for sharing code and data from the Full Fact AI Trust Benchm
 
 ## Report 1 (October 2026)
 
-All the data discussed in Full Fact's [first Public Interest AI Trust Benchmark report](https://fullfact.org/ai-benchmark/) can be found in the SQLite database included in this repository. The code here is a subset of the code we used internally to process the data, including extracting atomic facts, deduplicating them and scoring chatbot responses. To keep things simple, we haven't included the browser-based UI and we've moved the database to local SQLite storage instead of a shared cloud SQL database. 
+All the data discussed in Full Fact's [first Public Interest AI Trust Benchmark report](https://fullfact.org/ai-benchmark/report-one/) can be found in the SQLite database included in this repository. The code here is a subset of the code we used internally to process the data, including extracting atomic facts, deduplicating them and scoring chatbot responses. To keep things simple, we haven't included the browser-based UI and we've moved the database to local SQLite storage instead of a shared cloud SQL database. 
 
 For subsequent versions of the benchmark, we have already developed a more robust version of the tool with better handling of atomic facts and improved scoring methods. This version reflects how the data and analysis of the first report was produced. It is not intended as a fully working system nor is the code being maintained.
 
