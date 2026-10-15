@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_DB_PATH = str(
     Path(__file__).resolve().parents[2]
     / "data"
-    / "benchmark-2026-07-13-to-2026-09-22-filtered.sqlite"
+    / "benchmark-2026-07-13-to-2026-09-22.sqlite"
 )
 
 # The export uses its own labels for paragraph annotations.

@@ -18,7 +18,7 @@ After cloning the repo,  you need to decompress the archived data set:
 
 `unzip benchmark-2026-07-13-to-2026-09-22-filtered.sqlite.zip`
 
-to extract `data/benchmark-2026-07-13-to-2026-09-22-filtered.sqlite`
+to extract `data/benchmark-2026-07-13-to-2026-09-22.sqlite`
 
 
 Now you can run the first demo script:
