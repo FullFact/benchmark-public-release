@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Benchmark Score Explorer</title>
+  <style>
+    :root {
+      --cyan: #00FCE8;
+      --pink: #FF51A9;
+      --gray: #F0F0F0;
+      --black: #1e1e1e;
+      --white: #ffffff;
+      --muted: #707070;
+    }
+
+    body {
+      margin: 0;
+      padding: 24px 16px;
+      background: var(--white);
+      color: var(--black);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      line-height: 1.4;
+    }
+
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+    }
+
+
+
+    h1 {
+      display: inline-block;
+      margin: 0 0 20px;
+      padding: 2px 8px;
+      background: var(--cyan);
+      font-size: 1.6rem;
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    select {
+      width: 100%;
+      padding: 6px;
+      font: inherit;
+      border: 1px solid var(--black);
+      background: var(--white);
+      color: var(--black);
+    }
+
+    .models {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .question-filters {
+      display: grid;
+      grid-template-columns: 1fr 3fr;
+      gap: 12px;
+    }
+
+    @media (max-width: 600px) {
+
+      .models,
+      .question-filters {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .tags {
+      min-height: 1.5em;
+      margin: 4px 0 0;
+      font-size: 0.9rem;
+    }
+
+    .tag {
+      display: inline-block;
+      margin-right: 6px;
+      padding: 0 6px;
+      border: 1px solid var(--pink);
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      margin-top: 20px;
+    }
+
+    table {
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    th.dim,
+    td.dim {
+      text-align: left;
+      padding: 6px 16px 6px 8px;
+      white-space: nowrap;
+    }
+
+    thead tr.models-row th {
+      padding: 6px 8px;
+      background: var(--gray);
+      border-bottom: 2px solid var(--black);
+      text-align: center;
+    }
+
+    thead tr.cols-row th {
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--muted);
+      padding: 2px 4px;
+    }
+
+    tbody tr:nth-child(even) {
+      background: var(--gray);
+    }
+
+    td.mean {
+      font-size: 1.1rem;
+      font-weight: 600;
+      padding: 6px 8px 6px 16px;
+    }
+
+    td.range {
+      font-size: 0.75rem;
+      color: #404040;
+      padding: 2px 4px;
+    }
+
+    .group-start {
+      border-left: 2px solid var(--black);
+    }
+
+    .status {
+      margin-top: 12px;
+      color: var(--muted);
+    }
+    /* site navigation: identical on every page, top-left above the content */
+    nav.site-nav { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 0 0 16px; font-size: 0.9rem; }
+    nav.site-nav a { color: var(--black); }
+    nav.site-nav [aria-current] { color: #707070; }
+  </style>
+</head>
+
+<body>
+<nav class="site-nav"><a href="/">Intro</a><span aria-current="page">Benchmark Score Explorer</span><a href="/timeseries">Score Time Series</a><a href="/responses">Response Explorer</a></nav>
+  <main>
+    <h1>Benchmark Score Explorer</h1>
+
+    <div class="question-filters">
+      <div>
+        <label for="tag">Question tag</label>
+        <select id="tag">
+          <option value="">All tags</option>
+        </select>
+      </div>
+      <div>
+        <label for="question">Question</label>
+        <select id="question">
+          <option value="">All questions</option>
+        </select>
+        <div class="tags" id="tags"></div>
+      </div>
+    </div>
+
+    <div class="models">
+      <div>
+        <label for="model-0">Model 1</label>
+        <select id="model-0" class="model-select"></select>
+      </div>
+      <div>
+        <label for="model-1">Model 2</label>
+        <select id="model-1" class="model-select"></select>
+      </div>
+      <div>
+        <label for="model-2">Model 3</label>
+        <select id="model-2" class="model-select"></select>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead id="head"></thead>
+        <tbody id="summary"></tbody>
+      </table>
+    </div>
+    <div class="status" id="status"></div>
+  </main>
+
+  <script>
+    // "" means "all models"; NONE means the column is unused
+    const NONE = "-";
+    const ALL = "all";
+    const ALL_LABEL = "All models";
+    const tagSelect = document.getElementById("tag");
+    const questionSelect = document.getElementById("question");
+    const modelSelects = [...document.querySelectorAll(".model-select")];
+    const tagsDiv = document.getElementById("tags");
+    const head = document.getElementById("head");
+    const summaryBody = document.getElementById("summary");
+    const statusDiv = document.getElementById("status");
+    const questions = {};
+    let dimensions = [];
+
+    // score range per dimension for the heat map; others are 0-1
+    const DIMENSION_RANGES = { polarity: [-1, 1], url_quality: [-1, 3] };
+
+    // heat map colours at the minimum, middle and maximum of a dimension's range
+    const HEAT_STOPS = [[150, 190, 240], [240, 240, 236], [250, 226, 105]];
+
+    function heatColour(dim, value) {
+      // light blue (minimum) through pale grey to light yellow (maximum); going
+      // via grey rather than round the hue wheel avoids a muddy green midpoint
+      if (value === null || value === undefined) return "";
+      const [lo, hi] = DIMENSION_RANGES[dim] || [0, 1];
+      const t = Math.min(1, Math.max(0, (value - lo) / (hi - lo)));
+      const [from, to, u] = t < 0.5 ? [HEAT_STOPS[0], HEAT_STOPS[1], t * 2] : [HEAT_STOPS[1], HEAT_STOPS[2], t * 2 - 1];
+      return `rgb(${from.map((c, i) => Math.round(c + (to[i] - c) * u)).join(", ")})`;
+    }
+
+    function fmt(value, digits) {
+      return value === null || value === undefined ? "–" : value.toFixed(digits);
+    }
+
+    function addOption(select, value, text) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = text;
+      select.appendChild(option);
+    }
+
+    function addCell(row, tag, text, className) {
+      const cell = document.createElement(tag);
+      cell.textContent = text;
+      if (className) cell.className = className;
+      row.appendChild(cell);
+      return cell;
+    }
+
+    function showTags() {
+      tagsDiv.replaceChildren();
+      const question = questions[questionSelect.value];
+      if (!question) return;
+      for (const tag of question.tags) addCell(tagsDiv, "span", tag, "tag");
+    }
+
+    async function fetchSummary(model) {
+      const params = new URLSearchParams();
+      if (model) params.set("model", model);
+      if (tagSelect.value) params.set("tag", tagSelect.value);
+      if (questionSelect.value) params.set("question_id", questionSelect.value);
+      const response = await fetch(`/api/summary?${params}`);
+      const data = await response.json();
+      // index by dimension for lookup when building rows
+      return Object.fromEntries(data.dimensions.map(d => [d.dimension, d]));
+    }
+
+    function saveState() {
+      // keep the selection in the URL so a view can be bookmarked or shared;
+      // same parameter names as the time-series page, with "all" for all models
+      const params = new URLSearchParams();
+      for (const select of modelSelects) {
+        if (select.value !== NONE) params.append("models", select.value || ALL);
+      }
+      if (tagSelect.value) params.set("tag", tagSelect.value);
+      if (questionSelect.value) params.set("question_id", questionSelect.value);
+      const query = params.toString();
+      history.replaceState(null, "", query ? `?${query}` : location.pathname);
+    }
+
+    function restoreState(models, tagList) {
+      // start from the selection in the URL; unknown values are ignored
+      const query = new URLSearchParams(location.search);
+      const urlModels = query.getAll("models")
+        .filter(m => m === ALL || models.includes(m))
+        .slice(0, modelSelects.length);
+      if (urlModels.length) {
+        modelSelects.forEach((select, i) => {
+          select.value = i < urlModels.length ? (urlModels[i] === ALL ? "" : urlModels[i]) : NONE;
+        });
+      }
+      if (tagList.includes(query.get("tag"))) tagSelect.value = query.get("tag");
+      fillQuestions();
+      questionSelect.value = query.get("question_id") || "";
+      // an unknown id (or one outside the tag) leaves nothing selected
+      if (questionSelect.selectedIndex < 0) questionSelect.value = "";
+      showTags();
+    }
+
+    async function loadSummary() {
+      saveState();
+      const models = modelSelects.map(s => s.value).filter(v => v !== NONE);
+      statusDiv.textContent = "Loading…";
+      const summaries = await Promise.all(models.map(fetchSummary));
+
+      head.replaceChildren();
+      const modelsRow = head.insertRow();
+      modelsRow.className = "models-row";
+      addCell(modelsRow, "th", "Dimension", "dim");
+      const colsRow = head.insertRow();
+      colsRow.className = "cols-row";
+      addCell(colsRow, "th", "", "dim");
+      for (const model of models) {
+        const th = addCell(modelsRow, "th", model || ALL_LABEL, "group-start");
+        th.colSpan = 3;
+        addCell(colsRow, "th", "mean", "group-start");
+        addCell(colsRow, "th", "min");
+        addCell(colsRow, "th", "max");
+      }
+
+      // only dimensions with a score for at least one selected model
+      const shown = dimensions.filter(dim => summaries.some(s => s[dim]));
+      summaryBody.replaceChildren();
+      for (const dim of shown) {
+        const row = summaryBody.insertRow();
+        addCell(row, "td", dim, "dim");
+        for (const summary of summaries) {
+          const d = summary[dim] || {};
+          for (const [value, digits, className] of [
+            [d.mean, 3, "mean group-start"],
+            [d.min, 2, "range"],
+            [d.max, 2, "range"],
+          ]) {
+            const cell = addCell(row, "td", fmt(value, digits), className);
+            cell.style.background = heatColour(dim, value);
+          }
+        }
+      }
+      statusDiv.textContent = shown.length ? "" : "No scores for this selection.";
+    }
+
+    function fillQuestions() {
+      // list only the questions with the chosen tag, keeping the current choice
+      // if it still applies
+      const current = questionSelect.value;
+      questionSelect.replaceChildren();
+      addOption(questionSelect, "", "All questions");
+      for (const q of Object.values(questions)) {
+        if (tagSelect.value && !q.tags.includes(tagSelect.value)) continue;
+        addOption(questionSelect, q.id, `[${q.id}] ${q.question}`);
+      }
+      questionSelect.value = [...questionSelect.options].some(o => o.value === current)
+        ? current
+        : "";
+    }
+
+    async function init() {
+      const [models, questionList, dimensionList, tagList] = await Promise.all([
+        fetch("/api/models").then(r => r.json()),
+        fetch("/api/questions").then(r => r.json()),
+        fetch("/api/dimensions").then(r => r.json()),
+        fetch("/api/tags").then(r => r.json()),
+      ]);
+      dimensions = dimensionList;
+      modelSelects.forEach((select, i) => {
+        if (i > 0) addOption(select, NONE, "—");
+        addOption(select, "", ALL_LABEL);
+        for (const model of models) addOption(select, model, model);
+        select.addEventListener("change", loadSummary);
+      });
+      for (const q of questionList) questions[q.id] = q;
+      for (const tag of tagList) addOption(tagSelect, tag, tag);
+      restoreState(models, tagList);
+      tagSelect.addEventListener("change", () => { fillQuestions(); showTags(); loadSummary(); });
+      questionSelect.addEventListener("change", () => { showTags(); loadSummary(); });
+      await loadSummary();
+    }
+
+    init();
+  </script>
+  
+</body>
+
+</html>

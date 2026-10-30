@@ -1,0 +1,8 @@
+# Runtime dependencies for the explorer container only (see Dockerfile);
+# versions match uv.lock. huggingface-hub is needed because api.service
+# imports api.ner.
+pandas==3.0.6
+litestar==2.24.0
+uvicorn==0.54.0
+pydantic==2.14.0
+huggingface-hub==1.33.0

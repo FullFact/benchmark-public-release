@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Response Explorer</title>
+  <style>
+    :root {
+      --cyan: #00FCE8;
+      --pink: #FF51A9;
+      --gray: #F0F0F0;
+      --black: #1e1e1e;
+      --white: #ffffff;
+      --muted: #52514e;
+    }
+    body {
+      margin: 0;
+      padding: 24px 16px;
+      background: var(--white);
+      color: var(--black);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      line-height: 1.4;
+    }
+    main { max-width: 1100px; margin: 0 auto; }
+    h1 {
+      display: inline-block;
+      margin: 0 0 20px;
+      padding: 2px 8px;
+      background: var(--cyan);
+      font-size: 1.6rem;
+    }
+    .filters { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; margin-bottom: 16px; }
+    .filters > div { min-width: 0; }
+    .filters .question { flex: 1 1 320px; max-width: 560px; }
+    label { display: block; font-weight: 600; margin-bottom: 4px; }
+    select, button {
+      padding: 4px 6px;
+      font: inherit;
+      border: 1px solid var(--black);
+      background: var(--white);
+      color: var(--black);
+    }
+    .question select { width: 100%; }
+    button { cursor: pointer; background: var(--cyan); font-weight: 600; padding: 4px 12px; }
+    button:hover, button:focus-visible { background: var(--pink); }
+    button:disabled { background: var(--gray); color: #9a9a96; cursor: default; }
+
+    .status { color: var(--muted); margin-bottom: 8px; }
+    .table-wrap { transition: opacity 0.15s; }
+    .table-wrap.loading { opacity: 0.5; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th, td { padding: 6px 8px; text-align: left; vertical-align: top; }
+    thead th { position: sticky; top: 0; background: var(--gray); border-bottom: 2px solid var(--black); }
+    tbody tr:nth-child(even) { background: var(--gray); }
+    td.date { white-space: nowrap; font-variant-numeric: tabular-nums; }
+    td.score { white-space: nowrap; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+    th.score { text-align: right; }
+    td.text { overflow-wrap: anywhere; }
+    .missing { color: var(--muted); font-style: italic; }
+    ul.urls { margin: 0; padding-left: 18px; }
+    ul.urls a { color: var(--black); }
+    .rating { color: var(--muted); font-size: 0.85em; }
+    /* site navigation: identical on every page, top-left above the content */
+    nav.site-nav { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 0 0 16px; font-size: 0.9rem; }
+    nav.site-nav a { color: var(--black); }
+    nav.site-nav [aria-current] { color: #707070; }
+  </style>
+</head>
+<body>
+<nav class="site-nav"><a href="/">Intro</a><a href="/scores">Benchmark Score Explorer</a><a href="/timeseries">Score Time Series</a><span aria-current="page">Response Explorer</span></nav>
+<main>
+  <h1>Response Explorer</h1>
+
+  <div class="filters">
+    <div>
+      <label for="model">Model</label>
+      <select id="model"><option value="">Choose…</option></select>
+    </div>
+    <div class="question">
+      <label for="question">Question</label>
+      <select id="question"><option value="">Choose…</option></select>
+    </div>
+    <div>
+      <label for="dimension">Dimension</label>
+      <select id="dimension"><option value="">Choose…</option></select>
+    </div>
+    <div>
+      <button type="button" id="sort" aria-label="Toggle sort order by score">Score ↓</button>
+    </div>
+  </div>
+
+  <div class="status" id="status"></div>
+  <div class="table-wrap" id="table-wrap">
+    <table hidden id="table">
+      <thead>
+        <tr><th>Date</th><th class="score">Score</th><th id="text-head">Response start</th></tr>
+      </thead>
+      <tbody id="table-body"></tbody>
+    </table>
+  </div>
+</main>
+
+<script>
+  const URL_QUALITY = "url_quality";
+  const modelSelect = document.getElementById("model");
+  const questionSelect = document.getElementById("question");
+  const dimensionSelect = document.getElementById("dimension");
+  const sortButton = document.getElementById("sort");
+  const statusDiv = document.getElementById("status");
+  const tableWrap = document.getElementById("table-wrap");
+  const table = document.getElementById("table");
+  const textHead = document.getElementById("text-head");
+  const tableBody = document.getElementById("table-body");
+
+  let rows = [];
+  let descending = true;
+  let fetchId = 0;
+
+  function addOption(select, value, text) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = text;
+    select.appendChild(option);
+  }
+
+  function resetSelect(select) {
+    select.length = 1;  // keep "Choose…"
+  }
+
+  async function getJson(url) {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`${url}: ${resp.status}`);
+    return resp.json();
+  }
+
+  async function loadQuestions(keep) {
+    // the questions the chosen model answered; keep the current choice if it's
+    // still available
+    resetSelect(questionSelect);
+    if (!modelSelect.value) return;
+    const questions = await getJson(`/api/questions?model=${encodeURIComponent(modelSelect.value)}`);
+    for (const q of questions) addOption(questionSelect, q.id, `${q.id}. ${q.question}`);
+    questionSelect.value = questions.some(q => String(q.id) === keep) ? keep : "";
+  }
+
+  function saveState() {
+    // keep the selection in the URL so a view can be bookmarked or shared
+    const params = new URLSearchParams();
+    if (modelSelect.value) params.set("model", modelSelect.value);
+    if (questionSelect.value) params.set("question_id", questionSelect.value);
+    if (dimensionSelect.value) params.set("dimension", dimensionSelect.value);
+    if (!descending) params.set("sort", "asc");
+    const query = params.toString();
+    history.replaceState(null, "", query ? `?${query}` : location.pathname);
+  }
+
+  async function refresh() {
+    saveState();
+    if (!modelSelect.value || !questionSelect.value || !dimensionSelect.value) {
+      rows = [];
+      table.hidden = true;
+      sortButton.disabled = true;
+      statusDiv.textContent = "Choose a model, question and dimension.";
+      return;
+    }
+    const id = ++fetchId;
+    tableWrap.classList.add("loading");
+    const params = new URLSearchParams({
+      model: modelSelect.value,
+      question_id: questionSelect.value,
+      dimension: dimensionSelect.value,
+    });
+    try {
+      const data = await getJson(`/api/responses?${params}`);
+      if (id !== fetchId) return;  // a newer request has started
+      rows = data.rows;
+      render();
+    } catch (err) {
+      statusDiv.textContent = `Could not load responses (${err.message}).`;
+    } finally {
+      if (id === fetchId) tableWrap.classList.remove("loading");
+    }
+  }
+
+  function sortedRows() {
+    // by score, missing scores last, ties by date
+    return [...rows].sort((a, b) => {
+      if (a.score === null || b.score === null) {
+        if (a.score === b.score) return a.date.localeCompare(b.date);
+        return a.score === null ? 1 : -1;
+      }
+      const diff = descending ? b.score - a.score : a.score - b.score;
+      return diff || a.date.localeCompare(b.date);
+    });
+  }
+
+  function addCell(row, text, className) {
+    const cell = document.createElement("td");
+    if (text !== undefined) cell.textContent = text;
+    if (className) cell.className = className;
+    row.appendChild(cell);
+    return cell;
+  }
+
+  function render() {
+    const showUrls = dimensionSelect.value === URL_QUALITY;
+    textHead.textContent = showUrls ? "Cited URLs" : "Response start";
+    sortButton.textContent = descending ? "Score ↓" : "Score ↑";
+    sortButton.disabled = rows.length === 0;
+    tableBody.replaceChildren();
+
+    for (const r of sortedRows()) {
+      const tr = document.createElement("tr");
+      addCell(tr, r.date, "date");
+      addCell(tr, r.score === null ? "–" : r.score.toFixed(2), "score");
+      const cell = addCell(tr, undefined, "text");
+      if (showUrls) {
+        if (r.urls.length === 0) {
+          cell.textContent = "No rated URLs";
+          cell.classList.add("missing");
+        } else {
+          const list = document.createElement("ul");
+          list.className = "urls";
+          for (const u of r.urls) {
+            const item = document.createElement("li");
+            const link = document.createElement("a");
+            link.href = u.url;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            link.textContent = u.url;
+            const rating = document.createElement("span");
+            rating.className = "rating";
+            rating.textContent = ` (${u.rating})`;
+            item.append(link, rating);
+            list.appendChild(item);
+          }
+          cell.appendChild(list);
+        }
+      } else if (r.start === null) {
+        cell.textContent = "No response start";
+        cell.classList.add("missing");
+      } else {
+        cell.textContent = r.start;
+      }
+      tableBody.appendChild(tr);
+    }
+
+    const scored = rows.filter(r => r.score !== null).length;
+    statusDiv.textContent = `${rows.length} days, ${scored} scored.`;
+    table.hidden = rows.length === 0;
+  }
+
+  async function init() {
+    const params = new URLSearchParams(location.search);
+    descending = params.get("sort") !== "asc";
+    const [models, dimensions] = await Promise.all([
+      getJson("/api/models"),
+      getJson("/api/dimensions"),
+    ]);
+    for (const m of models) addOption(modelSelect, m, m);
+    for (const d of dimensions) addOption(dimensionSelect, d, d);
+    if (models.includes(params.get("model"))) modelSelect.value = params.get("model");
+    if (dimensions.includes(params.get("dimension"))) dimensionSelect.value = params.get("dimension");
+    await loadQuestions(params.get("question_id"));
+    await refresh();
+  }
+
+  modelSelect.addEventListener("change", async () => {
+    await loadQuestions(questionSelect.value);
+    refresh();
+  });
+  questionSelect.addEventListener("change", refresh);
+  dimensionSelect.addEventListener("change", refresh);
+  sortButton.addEventListener("click", () => {
+    descending = !descending;
+    saveState();
+    render();
+  });
+
+  init().catch(err => { statusDiv.textContent = `Could not load the page (${err.message}).`; });
+</script>
+</body>
+</html>

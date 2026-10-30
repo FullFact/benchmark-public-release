@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Benchmark Data Explorer</title>
+  <style>
+    :root {
+      --cyan: #00FCE8;
+      --pink: #FF51A9;
+      --gray: #F0F0F0;
+      --black: #1e1e1e;
+      --white: #ffffff;
+      --muted: #52514e;
+    }
+
+    body {
+      margin: 0;
+      padding: 24px 16px;
+      background: var(--white);
+      color: var(--black);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      line-height: 1.45;
+    }
+
+    main {
+      max-width: 860px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      display: inline-block;
+      margin: 0 0 12px;
+      padding: 2px 8px;
+      background: var(--cyan);
+      font-size: 1.6rem;
+    }
+
+    p {
+      margin: 0 0 4px;
+    }
+
+    dt {
+      font-weight: 600;
+      margin-top: 10px;
+    }
+
+    dd {
+      margin: 0 0 4px;
+    }
+
+    .example {
+      margin: 0 0 0 16px;
+      font-size: 0.9em;
+      font-style: italic;
+      line-height: 1.35;
+    }
+
+    /* site navigation: identical on every page, top-left above the content */
+    nav.site-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 20px;
+      margin: 0 0 16px;
+      font-size: 0.9rem;
+    }
+
+    nav.site-nav a {
+      color: var(--black);
+    }
+
+    nav.site-nav [aria-current] {
+      color: #707070;
+    }
+  </style>
+</head>
+
+<body>
+  <nav class="site-nav"><span aria-current="page">Intro</span><a href="/scores">Benchmark Score Explorer</a><a
+      href="/timeseries">Score Time Series</a><a href="/responses">Response Explorer</a></nav>
+  <main>
+    <h1>Benchmark Data Explorer</h1>
+
+    <p>This is a data explorer for Benchmark Season 1 data. Click the menu options above to get going.
+
+    <p><b>Benchmark Score Explorer</b> Compare models to see their average scores for selected questions</p>
+    <p><b>Score Time Series</b> See how models' scores change over the 10 weeks</p>
+    <p><b>Response Explorer</b> Explore the raw responses, sorted by a chosen dimension.</p>
+
+    Reference answers, raw data etc. can be found in the
+    <a href="https://github.com/FullFact/benchmark-public-release/tree/main/report-1">public release
+      repo</a>.
+    </p>
+    <h3>Data dimensions</h3>
+    <p>
+      The original five dimensions are labelled <b>*</b> and are based on human annotation, as is the URL quality score.
+      The others are predicted by a Gemma model's post hoc analysis of the first full sentence of each response.</p>
+
+    <div class="example">Question used in examples below: How many cases were there?</div>
+    <dl>
+      <dt>Factuality*</dt>
+      <dd>Proportion of "essential" paragraphs in the marking scheme found in the response.</dd>
+      <dt>Certainty</dt>
+      <dd>How certain is the chatbot that the claim is true?
+        <div class="example">High: It was about 1000 cases.</div>
+        <div class="example">Low: It might have been about 1000 cases.</div>
+      </dd>
+      <dt>Precision</dt>
+      <dd>How exactly is the claim stated?
+        <div class="example">High: It was 1000 cases.</div>
+        <div class="example">Low: It was about 1000 cases.</div>
+      </dd>
+      <dt>Directness</dt>
+      <dd>Is the chatbot answering the question directly, or relying on an external source?
+        <div class="example">Direct (1): It was 1000 cases.</div>
+        <div class="example">Indirect (0): According to the WHO, it was 1000 cases.</div>
+      </dd>
+      <dt>Polarity</dt>
+      <dd>Is the answer 'yes' or 'no'?
+        <div class="example">Yes (1): It was 1000 cases.</div>
+        <div class="example">No (-1): It was not 1000 cases.</div>
+      </dd>
+      <dt>Bipolar</dt>
+      <dd>Is the answer both 'yes' and 'no'?
+        <div class="example">Bipolar (1): It was 1000 cases but it later fell.</div>
+        <div class="example">Not bipolar (0): It was 1000 cases.</div>
+      </dd>
+      <dt>Non Polar</dt>
+      <dd>Neither agrees with nor disagrees with the question.</dd>
+      <dt>Consistency*</dt>
+      <dd>What proportion of the atoms are the same over time in response to this question?</dd>
+      <dt>URL quality</dt>
+      <dd>Mean quality rating of the URLs cited in the response.
+        <div class="example">Primary 3, good 2, OK 1, poor −1.</div>
+      </dd>
+      <dt>Civic responsibility*</dt>
+      <dd>For questions tagged "civics", how factual is the response?</dd>
+      <dt>Timeliness*</dt>
+      <dd>If the truth-state changed over time, did the response contain the updated information?
+        <div class="example">Timely (1): Andy Burnham became PM in June 2026.</div>
+        <div class="example">Not timely (0): Keir Starmer is still PM in October 2026.</div>
+      </dd>
+      <dt>Transparency*</dt>
+      <dd>Does the response acknowledge complexity, multiple points of view etc.?
+        <div class="example">Not shown here for some reason.</div>
+      </dd>
+
+    </dl>
+  </main>
+</body>
+
+</html>

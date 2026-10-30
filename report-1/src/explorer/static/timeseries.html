@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Score Time Series</title>
+  <style>
+    :root {
+      --cyan: #00FCE8;
+      --pink: #FF51A9;
+      --gray: #F0F0F0;
+      --black: #1e1e1e;
+      --white: #ffffff;
+      --muted: #52514e;
+      --grid: #e4e4e2;
+      /* categorical series colours, one per model in fixed order */
+      --series-1: #2a78d6;
+      --series-2: #eb6834;
+      --series-3: #1baf7a;
+      --series-4: #eda100;
+      --series-5: #e87ba4;
+      --series-6: #008300;
+      --series-7: #6250d6;
+      --series-8: #e34948;
+    }
+    body {
+      margin: 0;
+      padding: 24px 16px;
+      background: var(--white);
+      color: var(--black);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      line-height: 1.4;
+    }
+    main { max-width: 1100px; margin: 0 auto; }
+    h1 {
+      display: inline-block;
+      margin: 0 0 20px;
+      padding: 2px 8px;
+      background: var(--cyan);
+      font-size: 1.6rem;
+    }
+    .filters { display: flex; flex-wrap: wrap; gap: 24px; margin-bottom: 16px; }
+    fieldset { border: 1px solid var(--black); margin: 0; padding: 8px 12px; min-width: 0; }
+    legend { font-weight: 600; padding: 0 4px; }
+    fieldset.questions { flex: 1 1 280px; max-width: 520px; }
+    fieldset.questions label { display: block; font-size: 0.9rem; margin: 4px 0 2px; }
+    fieldset select {
+      width: 100%;
+      padding: 4px 6px;
+      font: inherit;
+      border: 1px solid var(--black);
+      background: var(--white);
+      color: var(--black);
+    }
+    .options { display: flex; flex-wrap: wrap; gap: 4px 14px; max-width: 520px; }
+    .options label { white-space: nowrap; font-size: 0.9rem; }
+    .options label.disabled { color: #9a9a96; }
+    .hint { font-size: 0.8rem; color: var(--muted); margin-top: 4px; }
+
+    .chart-wrap { position: relative; transition: opacity 0.15s; }
+    .chart-wrap.loading { opacity: 0.5; }
+    #chart { display: block; width: 100%; height: auto; overflow: visible; }
+    .axis-label { font-size: 12px; fill: var(--muted); }
+    .grid-line { stroke: var(--grid); stroke-width: 1; }
+    .zero-line { stroke: #b0b0ac; stroke-width: 1; }
+    .series-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+    .crosshair { stroke: var(--black); stroke-width: 1; }
+    .hover-dot { stroke: var(--white); stroke-width: 2; }
+
+    .tooltip {
+      position: absolute;
+      pointer-events: none;
+      background: var(--white);
+      border: 1px solid var(--black);
+      padding: 6px 8px;
+      font-size: 0.8rem;
+      min-width: 180px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+    }
+    .tooltip .date { font-weight: 600; margin-bottom: 4px; }
+    .tooltip .row { display: flex; align-items: center; gap: 6px; }
+    .tooltip .value { font-weight: 700; font-variant-numeric: tabular-nums; min-width: 3.2em; }
+    .tooltip .name { color: var(--muted); }
+
+    .key { display: inline-block; vertical-align: middle; flex: none; }
+    .chart-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 8px; font-size: 0.9rem; }
+    .chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+
+    details { margin-top: 20px; }
+    summary { cursor: pointer; font-weight: 600; }
+    .table-wrap { overflow-x: auto; max-height: 420px; overflow-y: auto; margin-top: 8px; }
+    table { border-collapse: collapse; font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+    th, td { padding: 3px 8px; text-align: right; white-space: nowrap; }
+    th:first-child, td:first-child { text-align: left; }
+    thead th { position: sticky; top: 0; background: var(--gray); border-bottom: 2px solid var(--black); }
+    tbody tr:nth-child(even) { background: var(--gray); }
+    .status { color: var(--muted); margin-top: 8px; }
+    /* site navigation: identical on every page, top-left above the content */
+    nav.site-nav { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 0 0 16px; font-size: 0.9rem; }
+    nav.site-nav a { color: var(--black); }
+    nav.site-nav [aria-current] { color: #707070; }
+  </style>
+</head>
+<body>
+<nav class="site-nav"><a href="/">Intro</a><a href="/scores">Benchmark Score Explorer</a><span aria-current="page">Score Time Series</span><a href="/responses">Response Explorer</a></nav>
+<main>
+  <h1>Score Time Series</h1>
+
+  <div class="filters">
+    <fieldset>
+      <legend>Models</legend>
+      <div class="options" id="model-options"></div>
+    </fieldset>
+    <fieldset>
+      <legend>Dimensions</legend>
+      <div class="options" id="dimension-options"></div>
+      <div class="hint">Up to 4 at once (each gets its own line style).</div>
+    </fieldset>
+    <fieldset class="questions">
+      <legend>Questions</legend>
+      <label for="tag">Tag</label>
+      <select id="tag"><option value="">All tags</option></select>
+      <label for="question">Question</label>
+      <select id="question"><option value="">All questions</option></select>
+    </fieldset>
+  </div>
+
+  <div class="chart-wrap" id="chart-wrap">
+    <svg id="chart" role="img" aria-label="Daily mean scores over time"></svg>
+    <div class="tooltip" id="tooltip" hidden></div>
+  </div>
+  <div class="chart-legend" id="chart-legend"></div>
+  <div class="status" id="status"></div>
+
+  <details>
+    <summary>Data table</summary>
+    <div class="table-wrap">
+      <table>
+        <thead id="table-head"></thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>
+  </details>
+</main>
+
+<script>
+  const ALL = "all";
+  const ALL_LABEL = "All models";
+  const MAX_DIMENSIONS = 4;
+  const DASHES = ["", "7 4", "2 3", "8 3 2 3"];
+  // score range per dimension; others are 0-1
+  const DIMENSION_RANGES = { polarity: [-1, 1], url_quality: [-1, 3] };
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const MARGIN = { top: 12, right: 16, bottom: 30, left: 44 };
+  const HEIGHT = 380;
+
+  const chartWrap = document.getElementById("chart-wrap");
+  const svg = document.getElementById("chart");
+  const tooltip = document.getElementById("tooltip");
+  const legendDiv = document.getElementById("chart-legend");
+  const statusDiv = document.getElementById("status");
+  const modelOptions = document.getElementById("model-options");
+  const tagSelect = document.getElementById("tag");
+  const questionSelect = document.getElementById("question");
+  const questions = {};  // every question with scores, by id
+  const dimensionOptions = document.getElementById("dimension-options");
+
+  let models = [];      // every model, "all" first: its index fixes its colour
+  let dimensions = [];  // every dimension in display order
+  let data = null;      // last /api/timeseries response
+
+  const modelLabel = m => (m === ALL ? ALL_LABEL : m);
+  const colourFor = m => `var(--series-${(models.indexOf(m) % 8) + 1})`;
+
+  function el(tag, attrs = {}, parent) {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+    if (parent) parent.appendChild(node);
+    return node;
+  }
+
+  function lineKey(colour, dash) {
+    const key = el("svg", { width: 26, height: 10, class: "key" });
+    el("line", {
+      x1: 1, y1: 5, x2: 25, y2: 5, stroke: colour, "stroke-width": 2,
+      "stroke-dasharray": dash, "stroke-linecap": "round",
+    }, key);
+    return key;
+  }
+
+  function checkbox(parent, value, text, checked) {
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = value;
+    input.checked = checked;
+    input.addEventListener("change", onFilterChange);
+    label.append(input, " ", text);
+    parent.appendChild(label);
+    return input;
+  }
+
+  function selected(container) {
+    return [...container.querySelectorAll("input:checked")].map(i => i.value);
+  }
+
+  function onFilterChange() {
+    // cap the dimensions so each can have its own line style
+    const dims = selected(dimensionOptions);
+    for (const input of dimensionOptions.querySelectorAll("input")) {
+      input.disabled = !input.checked && dims.length >= MAX_DIMENSIONS;
+      input.parentElement.classList.toggle("disabled", input.disabled);
+    }
+    loadData();
+  }
+
+  async function loadData() {
+    const params = new URLSearchParams();
+    for (const m of selected(modelOptions)) params.append("models", m);
+    for (const d of selected(dimensionOptions)) params.append("dimensions", d);
+    if (tagSelect.value) params.set("tag", tagSelect.value);
+    if (questionSelect.value) params.set("question_id", questionSelect.value);
+    if (!params.has("models") || !params.has("dimensions")) {
+      data = { dates: data ? data.dates : [], series: [] };
+      render();
+      return;
+    }
+    // keep the selection in the URL so a view can be bookmarked or shared
+    history.replaceState(null, "", `?${params}`);
+    chartWrap.classList.add("loading");
+    const response = await fetch(`/api/timeseries?${params}`);
+    data = await response.json();
+    chartWrap.classList.remove("loading");
+    render();
+  }
+
+  function seriesStyle(s) {
+    const dims = selected(dimensionOptions);
+    return { colour: colourFor(s.model), dash: DASHES[dims.indexOf(s.dimension)] || "" };
+  }
+
+  function seriesName(s) {
+    return `${modelLabel(s.model)} · ${s.dimension}`;
+  }
+
+  function formatDate(iso) {
+    const d = new Date(iso + "T00:00:00");
+    return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  }
+
+  function render() {
+    svg.replaceChildren();
+    tooltip.hidden = true;
+    const width = chartWrap.clientWidth;
+    svg.setAttribute("viewBox", `0 0 ${width} ${HEIGHT}`);
+    const plotW = width - MARGIN.left - MARGIN.right;
+    const plotH = HEIGHT - MARGIN.top - MARGIN.bottom;
+    const { dates, series } = data;
+
+    const lo = Math.min(0, ...series.map(s => (DIMENSION_RANGES[s.dimension] || [0, 1])[0]));
+    const hi = Math.max(1, ...series.map(s => (DIMENSION_RANGES[s.dimension] || [0, 1])[1]));
+    const x = i => MARGIN.left + (dates.length > 1 ? (i / (dates.length - 1)) * plotW : plotW / 2);
+    const y = v => MARGIN.top + ((hi - v) / (hi - lo)) * plotH;
+
+    // y gridlines every 0.25 (0.5 when the range is -1 to 1, 1 when wider)
+    const step = hi - lo > 2 ? 1 : hi - lo > 1 ? 0.5 : 0.25;
+    for (let v = lo; v <= hi + 1e-9; v += step) {
+      el("line", {
+        x1: MARGIN.left, x2: MARGIN.left + plotW, y1: y(v), y2: y(v),
+        class: Math.abs(v) < 1e-9 && lo < 0 ? "zero-line" : "grid-line",
+      }, svg);
+      const label = el("text", {
+        x: MARGIN.left - 8, y: y(v) + 4, "text-anchor": "end", class: "axis-label",
+      }, svg);
+      label.textContent = v.toFixed(2);
+    }
+
+    // x ticks on Mondays, every other week when the chart is too narrow
+    const weekStep = (7 * plotW) / Math.max(dates.length - 1, 1) < 56 ? 2 : 1;
+    let monday = 0;
+    dates.forEach((d, i) => {
+      if (new Date(d + "T00:00:00").getDay() !== 1) return;
+      if (monday++ % weekStep) return;
+      el("line", {
+        x1: x(i), x2: x(i), y1: MARGIN.top + plotH, y2: MARGIN.top + plotH + 4,
+        class: "zero-line",
+      }, svg);
+      const label = el("text", {
+        x: x(i), y: MARGIN.top + plotH + 18, "text-anchor": "middle", class: "axis-label",
+      }, svg);
+      label.textContent = formatDate(d);
+    });
+
+    // lines, broken where a day has no score; lone points drawn as dots
+    for (const s of series) {
+      const { colour, dash } = seriesStyle(s);
+      let path = "";
+      s.values.forEach((v, i) => {
+        if (v === null) return;
+        const prevMissing = i === 0 || s.values[i - 1] === null;
+        const nextMissing = i === s.values.length - 1 || s.values[i + 1] === null;
+        if (prevMissing && nextMissing) {
+          el("circle", { cx: x(i), cy: y(v), r: 2.5, fill: colour }, svg);
+        }
+        path += `${prevMissing ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`;
+      });
+      el("path", {
+        d: path, class: "series-line", stroke: colour, "stroke-dasharray": dash,
+      }, svg);
+    }
+
+    // crosshair + tooltip layer
+    const hoverGroup = el("g", {}, svg);
+    const overlay = el("rect", {
+      x: MARGIN.left, y: MARGIN.top, width: plotW, height: plotH, fill: "transparent",
+    }, svg);
+    overlay.addEventListener("pointermove", event => {
+      const box = svg.getBoundingClientRect();
+      const px = ((event.clientX - box.left) / box.width) * width;
+      const i = Math.round(((px - MARGIN.left) / plotW) * (dates.length - 1));
+      showHover(Math.max(0, Math.min(dates.length - 1, i)), x, y, plotH, hoverGroup);
+    });
+    overlay.addEventListener("pointerleave", () => {
+      hoverGroup.replaceChildren();
+      tooltip.hidden = true;
+    });
+
+    renderLegend(series);
+    renderTable(dates, series);
+    statusDiv.textContent = series.length ? "" : "Choose at least one model and one dimension.";
+  }
+
+  function showHover(i, x, y, plotH, group) {
+    const { dates, series } = data;
+    group.replaceChildren();
+    el("line", {
+      x1: x(i), x2: x(i), y1: MARGIN.top, y2: MARGIN.top + plotH, class: "crosshair",
+    }, group);
+    const rows = series
+      .map(s => ({ s, v: s.values[i] }))
+      .sort((a, b) => (b.v ?? -Infinity) - (a.v ?? -Infinity));
+    for (const { s, v } of rows) {
+      if (v === null) continue;
+      el("circle", { cx: x(i), cy: y(v), r: 4, fill: seriesStyle(s).colour, class: "hover-dot" }, group);
+    }
+
+    tooltip.replaceChildren();
+    const date = document.createElement("div");
+    date.className = "date";
+    date.textContent = formatDate(dates[i]);
+    tooltip.appendChild(date);
+    for (const { s, v } of rows) {
+      const row = document.createElement("div");
+      row.className = "row";
+      const { colour, dash } = seriesStyle(s);
+      const value = document.createElement("span");
+      value.className = "value";
+      value.textContent = v === null ? "–" : v.toFixed(3);
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = seriesName(s);
+      row.append(lineKey(colour, dash), value, name);
+      tooltip.appendChild(row);
+    }
+    tooltip.hidden = false;
+    const wrapW = chartWrap.clientWidth;
+    const left = (x(i) / Number(svg.viewBox.baseVal.width)) * wrapW;
+    const flip = left > wrapW / 2;
+    tooltip.style.left = flip ? "" : `${left + 12}px`;
+    tooltip.style.right = flip ? `${wrapW - left + 12}px` : "";
+    tooltip.style.top = `${MARGIN.top}px`;
+  }
+
+  function renderLegend(series) {
+    legendDiv.replaceChildren();
+    for (const s of series) {
+      const item = document.createElement("span");
+      const { colour, dash } = seriesStyle(s);
+      item.append(lineKey(colour, dash), seriesName(s));
+      legendDiv.appendChild(item);
+    }
+  }
+
+  function renderTable(dates, series) {
+    const head = document.getElementById("table-head");
+    const body = document.getElementById("table-body");
+    head.replaceChildren();
+    body.replaceChildren();
+    const headRow = head.insertRow();
+    headRow.appendChild(document.createElement("th")).textContent = "Date";
+    for (const s of series) {
+      headRow.appendChild(document.createElement("th")).textContent = seriesName(s);
+    }
+    dates.forEach((d, i) => {
+      const row = body.insertRow();
+      row.insertCell().textContent = d;
+      for (const s of series) {
+        const v = s.values[i];
+        row.insertCell().textContent = v === null ? "–" : v.toFixed(3);
+      }
+    });
+  }
+
+  function addOption(select, value, text) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = text;
+    select.appendChild(option);
+  }
+
+  function fillQuestions() {
+    // list only the questions with the chosen tag, keeping the current choice
+    // if it still applies
+    const current = questionSelect.value;
+    questionSelect.replaceChildren();
+    addOption(questionSelect, "", "All questions");
+    for (const q of Object.values(questions)) {
+      if (tagSelect.value && !q.tags.includes(tagSelect.value)) continue;
+      addOption(questionSelect, q.id, `[${q.id}] ${q.question}`);
+    }
+    questionSelect.value = [...questionSelect.options].some(o => o.value === current)
+      ? current
+      : "";
+  }
+
+  async function init() {
+    const [modelList, dimensionList, tagList, questionList] = await Promise.all([
+      fetch("/api/models").then(r => r.json()),
+      fetch("/api/dimensions").then(r => r.json()),
+      fetch("/api/tags").then(r => r.json()),
+      fetch("/api/questions").then(r => r.json()),
+    ]);
+    models = [ALL, ...modelList];
+    dimensions = dimensionList;
+    // start from the selection in the URL, else all models + factuality
+    const query = new URLSearchParams(location.search);
+    const startModels = query.getAll("models").length ? query.getAll("models") : [ALL];
+    const startDims = query.getAll("dimensions").length
+      ? query.getAll("dimensions").slice(0, MAX_DIMENSIONS)
+      : ["factuality"];
+    for (const m of models) checkbox(modelOptions, m, modelLabel(m), startModels.includes(m));
+    for (const d of dimensions) checkbox(dimensionOptions, d, d, startDims.includes(d));
+    for (const tag of tagList) addOption(tagSelect, tag, tag);
+    tagSelect.value = tagList.includes(query.get("tag")) ? query.get("tag") : "";
+    for (const q of questionList) questions[q.id] = q;
+    fillQuestions();
+    questionSelect.value = query.get("question_id") || "";
+    // an unknown id (or one outside the tag) leaves nothing selected
+    if (questionSelect.selectedIndex < 0) questionSelect.value = "";
+    tagSelect.addEventListener("change", () => { fillQuestions(); loadData(); });
+    questionSelect.addEventListener("change", loadData);
+    window.addEventListener("resize", () => data && render());
+    onFilterChange();
+  }
+
+  init();
+</script>
+</body>
+</html>
