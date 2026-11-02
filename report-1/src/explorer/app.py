@@ -18,6 +18,7 @@ import pandas as pd
 import uvicorn
 from litestar import Litestar, MediaType, get
 from litestar.datastructures import State
+from litestar.exceptions import ValidationException
 
 from explorer.factuality_viewer import (
     filter_by_model,
@@ -26,6 +27,7 @@ from explorer.factuality_viewer import (
     load_questions,
     load_url_details,
     order_dimensions,
+    question_table,
     response_rows,
     summarise_dimensions,
 )
@@ -48,6 +50,11 @@ async def index() -> str:
 @get("/scores", media_type=MediaType.HTML)
 async def scores_page() -> str:
     return (STATIC_DIR / "scores.html").read_text(encoding="utf-8")
+
+
+@get("/questions", media_type=MediaType.HTML)
+async def questions_page() -> str:
+    return (STATIC_DIR / "questions.html").read_text(encoding="utf-8")
 
 
 @get("/timeseries", media_type=MediaType.HTML)
@@ -156,10 +163,29 @@ async def get_responses(
     }
 
 
+@get("/api/question-table")
+async def get_question_table(
+    state: State, model: str | None = None, dimension: str | None = None
+) -> dict:
+    # mean score per question: one column per dimension for a model ("all" for
+    # every model combined), or one column per model for a dimension
+    if (model is None) == (dimension is None):
+        raise ValidationException("Give exactly one of model or dimension")
+    table = question_table(
+        state.df, None if model == ALL_MODELS else model, dimension
+    )
+    for row in table["rows"]:
+        question = state.questions[row["question_id"]]
+        row["question"] = question["question"]
+        row["tags"] = question["tags"]
+    return table
+
+
 app = Litestar(
     route_handlers=[
         index,
         scores_page,
+        questions_page,
         timeseries_page,
         responses_page,
         get_models,
@@ -169,6 +195,7 @@ app = Litestar(
         get_summary,
         get_timeseries,
         get_responses,
+        get_question_table,
     ],
     on_startup=[load_data],
 )

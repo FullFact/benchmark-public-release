@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Question Explorer</title>
+  <style>
+    :root {
+      --cyan: #00FCE8;
+      --pink: #FF51A9;
+      --gray: #F0F0F0;
+      --black: #1e1e1e;
+      --white: #ffffff;
+      --muted: #52514e;
+    }
+    body {
+      margin: 0;
+      padding: 24px 16px;
+      background: var(--white);
+      color: var(--black);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      line-height: 1.4;
+    }
+    main { max-width: 1100px; margin: 0 auto; }
+    h1 {
+      display: inline-block;
+      margin: 0 0 20px;
+      padding: 2px 8px;
+      background: var(--cyan);
+      font-size: 1.6rem;
+    }
+    label { display: block; font-weight: 600; margin-bottom: 4px; }
+    select {
+      max-width: 100%;
+      padding: 6px;
+      font: inherit;
+      border: 1px solid var(--black);
+      background: var(--white);
+      color: var(--black);
+    }
+    .controls { margin-bottom: 16px; }
+    .hint { font-size: 0.8rem; color: var(--muted); margin-top: 4px; }
+
+    .table-wrap { overflow-x: auto; transition: opacity 0.15s; }
+    .table-wrap.loading { opacity: 0.5; }
+    table { border-collapse: collapse; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+    th, td { padding: 4px 8px; text-align: right; }
+    thead th {
+      position: sticky;
+      top: 0;
+      background: var(--gray);
+      border-bottom: 2px solid var(--black);
+      vertical-align: bottom;
+      white-space: nowrap;
+    }
+    th.question, td.question { text-align: left; min-width: 260px; max-width: 420px; }
+    td.question { font-weight: 400; }
+    tbody tr { border-bottom: 1px solid var(--gray); }
+    td.value { white-space: nowrap; }
+    .status { margin-top: 12px; color: var(--muted); }
+    /* site navigation: identical on every page, top-left above the content */
+    nav.site-nav { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 0 0 16px; font-size: 0.9rem; }
+    nav.site-nav a { color: var(--black); }
+    nav.site-nav [aria-current] { color: #707070; }
+  </style>
+</head>
+<body>
+<nav class="site-nav"><a href="/">Intro</a><a href="/scores">Benchmark Score Explorer</a><span aria-current="page">Question Explorer</span><a href="/timeseries">Score Time Series</a><a href="/responses">Response Explorer</a></nav>
+<main>
+  <h1>Question Explorer</h1>
+
+  <div class="controls">
+    <label for="show">Show</label>
+    <select id="show"></select>
+    <div class="hint">A model shows one column per dimension; a dimension shows one column per model.</div>
+  </div>
+
+  <div class="table-wrap" id="table-wrap">
+    <table>
+      <thead id="head"></thead>
+      <tbody id="body"></tbody>
+    </table>
+  </div>
+  <div class="status" id="status"></div>
+</main>
+
+<script>
+  const ALL = "all";
+  const ALL_LABEL = "All models";
+  const showSelect = document.getElementById("show");
+  const tableWrap = document.getElementById("table-wrap");
+  const head = document.getElementById("head");
+  const body = document.getElementById("body");
+  const statusDiv = document.getElementById("status");
+  let fetchId = 0;
+
+  // score range per dimension for the heat map; others are 0-1
+  const DIMENSION_RANGES = { polarity: [-1, 1], url_quality: [-1, 3] };
+
+  // heat map colours at the minimum, middle and maximum of a dimension's range
+  const HEAT_STOPS = [[150, 190, 240], [240, 240, 236], [250, 226, 105]];
+
+  function heatColour(dim, value) {
+    // light blue (minimum) through pale grey to light yellow (maximum); going
+    // via grey rather than round the hue wheel avoids a muddy green midpoint
+    if (value === null || value === undefined) return "";
+    const [lo, hi] = DIMENSION_RANGES[dim] || [0, 1];
+    const t = Math.min(1, Math.max(0, (value - lo) / (hi - lo)));
+    const [from, to, u] = t < 0.5 ? [HEAT_STOPS[0], HEAT_STOPS[1], t * 2] : [HEAT_STOPS[1], HEAT_STOPS[2], t * 2 - 1];
+    return `rgb(${from.map((c, i) => Math.round(c + (to[i] - c) * u)).join(", ")})`;
+  }
+
+  function addOption(parent, value, text) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = text;
+    parent.appendChild(option);
+  }
+
+  function addCell(row, tag, text, className) {
+    const cell = document.createElement(tag);
+    cell.textContent = text;
+    if (className) cell.className = className;
+    row.appendChild(cell);
+    return cell;
+  }
+
+  function selection() {
+    // "model:<name>" or "dimension:<name>" as [kind, name]
+    const value = showSelect.value;
+    const i = value.indexOf(":");
+    return [value.slice(0, i), value.slice(i + 1)];
+  }
+
+  function saveState() {
+    // keep the selection in the URL so a view can be bookmarked or shared
+    const [kind, name] = selection();
+    const params = new URLSearchParams({ [kind]: name });
+    history.replaceState(null, "", kind === "model" && name === ALL ? location.pathname : `?${params}`);
+  }
+
+  async function loadTable() {
+    saveState();
+    const [kind, name] = selection();
+    const id = ++fetchId;
+    tableWrap.classList.add("loading");
+    try {
+      const resp = await fetch(`/api/question-table?${new URLSearchParams({ [kind]: name })}`);
+      if (!resp.ok) throw new Error(resp.status);
+      const data = await resp.json();
+      if (id !== fetchId) return;  // a newer request has started
+      render(data, kind === "dimension" ? name : null);
+    } catch (err) {
+      statusDiv.textContent = `Could not load the table (${err.message}).`;
+    } finally {
+      if (id === fetchId) tableWrap.classList.remove("loading");
+    }
+  }
+
+  function render(data, dimension) {
+    head.replaceChildren();
+    const headRow = head.insertRow();
+    addCell(headRow, "th", "Question", "question");
+    for (const column of data.columns) addCell(headRow, "th", column);
+
+    body.replaceChildren();
+    for (const row of data.rows) {
+      const tr = body.insertRow();
+      const cell = addCell(tr, "td", `[${row.question_id}] ${row.question}`, "question");
+      if (row.tags.length) cell.title = `Tags: ${row.tags.join(", ")}`;
+      row.values.forEach((value, i) => {
+        const td = addCell(tr, "td", value === null ? "–" : value.toFixed(2), "value");
+        // a dimension's range sets the colour scale: the selected one, or the column's
+        td.style.background = heatColour(dimension || data.columns[i], value);
+      });
+    }
+    statusDiv.textContent = data.columns.length ? "" : "No scores for this selection.";
+  }
+
+  async function init() {
+    const [models, dimensions] = await Promise.all([
+      fetch("/api/models").then(r => r.json()),
+      fetch("/api/dimensions").then(r => r.json()),
+    ]);
+    const modelGroup = document.createElement("optgroup");
+    modelGroup.label = "Models";
+    addOption(modelGroup, `model:${ALL}`, ALL_LABEL);
+    for (const m of models) addOption(modelGroup, `model:${m}`, m);
+    const dimensionGroup = document.createElement("optgroup");
+    dimensionGroup.label = "Dimensions";
+    for (const d of dimensions) addOption(dimensionGroup, `dimension:${d}`, d);
+    showSelect.append(modelGroup, dimensionGroup);
+
+    // start from the selection in the URL, else all models
+    const query = new URLSearchParams(location.search);
+    const wanted = query.has("dimension") ? `dimension:${query.get("dimension")}` : `model:${query.get("model") || ALL}`;
+    showSelect.value = wanted;
+    if (showSelect.selectedIndex < 0) showSelect.value = `model:${ALL}`;
+    showSelect.addEventListener("change", loadTable);
+    await loadTable();
+  }
+
+  init().catch(err => { statusDiv.textContent = `Could not load the page (${err.message}).`; });
+</script>
+</body>
+</html>

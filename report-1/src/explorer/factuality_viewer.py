@@ -153,6 +153,45 @@ def filter_by_dimension(dim_name: str, df: pd.DataFrame) -> pd.DataFrame:
     return df[df["dimension"] == dim_name]
 
 
+ALL_MODELS_LABEL = "All models"
+
+
+def question_table(
+    df: pd.DataFrame, model: str | None = None, dimension: str | None = None
+) -> dict:
+    # mean score per question, as {"columns", "rows": [{"question_id",
+    # "values"}]}, with every question that has scores (None where there's no
+    # data). Given a dimension, there's one column per model, after an "All
+    # models" column; otherwise one column per dimension, for the model (or all
+    # models if None)
+    question_ids = sorted(set(df["question_id"]))
+    if dimension is None:
+        if model is not None:
+            df = filter_by_model(model, df)
+        table = df.pivot_table(
+            index="question_id", columns="dimension", values="score", aggfunc="mean"
+        )
+        table = table[order_dimensions(set(table.columns))]
+    else:
+        df = filter_by_dimension(dimension, df)
+        table = df.pivot_table(
+            index="question_id", columns="model", values="score", aggfunc="mean"
+        )
+        table = table[sorted(table.columns)]
+        table.insert(0, ALL_MODELS_LABEL, df.groupby("question_id")["score"].mean())
+    table = table.dropna(axis="columns", how="all").reindex(question_ids)
+    return {
+        "columns": list(table.columns),
+        "rows": [
+            {
+                "question_id": int(question_id),
+                "values": [None if pd.isna(v) else float(v) for v in values],
+            }
+            for question_id, values in zip(table.index, table.to_numpy())
+        ],
+    }
+
+
 def summarise_score(df: pd.DataFrame) -> pd.Series:
     # calculate and return min, max, mean (NULL scores are skipped) and row count
     summary = df["score"].agg(["min", "max", "mean", "size"])
