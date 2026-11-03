@@ -29,6 +29,15 @@ DIRECT_REPLY_VALUES = {
 URL_RATING_VALUES = {"primary": 3, "good": 2, "OK": 1, "poor": -1}
 URL_QUALITY = "url_quality"
 
+# essential paragraphs that are versions of the same point over time (e.g. who
+# the PM is), by question; each group counts as one essential paragraph, and
+# only a member whose dates include the response date earns credit
+ESSENTIAL_PARAGRAPH_GROUPS: dict[int, list[list[int]]] = {
+    45: [[152, 156]],  # Starmer's age: 63, then 64
+    101: [[224, 225, 239], [227, 228]],  # rate, level on previous quarter
+    142: [[354, 347]],  # PM: Starmer, then Burnham
+}
+
 
 # display order for dimensions; any others follow alphabetically
 DIMENSION_ORDER = [
@@ -155,6 +164,10 @@ def filter_by_dimension(dim_name: str, df: pd.DataFrame) -> pd.DataFrame:
 
 ALL_MODELS_LABEL = "All models"
 
+# correctness bands for a response, by the share of the question's essential
+# paragraphs it matched: all, at least half, some, none
+FACTUALITY_BANDS = ["correct", "mostly_correct", "partly_correct", "incorrect"]
+
 
 def question_table(
     df: pd.DataFrame, model: str | None = None, dimension: str | None = None
@@ -220,13 +233,112 @@ def summarise_dimensions(df: pd.DataFrame) -> list[dict]:
     return summaries
 
 
+def load_essential_slots() -> dict[int, list[list[dict]]]:
+    # return each question's essential slots: a group from
+    # ESSENTIAL_PARAGRAPH_GROUPS, or a single paragraph, as a list of paragraphs
+    paragraphs = MarkingSchemeService().get_essential_paragraphs()
+    by_id = {p["id"]: p for p in paragraphs}
+    slots: dict[int, list[list[dict]]] = {}
+    grouped = set()
+    for question_id, groups in ESSENTIAL_PARAGRAPH_GROUPS.items():
+        for group in groups:
+            slots.setdefault(question_id, []).append([by_id[i] for i in group])
+            grouped.update(group)
+    for p in paragraphs:
+        if p["id"] not in grouped:
+            slots.setdefault(p["question_id"], []).append([p])
+    return slots
+
+
+def applies_on(paragraph: dict, day: str) -> bool:
+    # whether the paragraph's dates (inclusive, None = open-ended) include day
+    return (paragraph["applies_from"] is None or paragraph["applies_from"] <= day) and (
+        paragraph["applies_to"] is None or day <= paragraph["applies_to"]
+    )
+
+
+def count_essential_matches(
+    matched_paragraphs: list[int], day: str, slots: list[list[dict]]
+) -> tuple[int, int]:
+    # return (matched, total) essential slots for a response on day: a slot
+    # counts if any member applies that day, and is matched if such a member is
+    # among the response's matched paragraphs
+    matched_ids = set(matched_paragraphs)
+    matched = total = 0
+    for slot in slots:
+        current = [p["id"] for p in slot if applies_on(p, day)]
+        if not current:
+            continue
+        total += 1
+        matched += any(i in matched_ids for i in current)
+    return matched, total
+
+
+def rescore_factuality(df: pd.DataFrame) -> pd.DataFrame:
+    # return df with each factuality score recomputed from essential slots, so
+    # dated versions of a paragraph count once and only on their dates; the
+    # counts are added to the row's detail as matched_slots and total_slots
+    slots = load_essential_slots()
+    is_factuality = df["dimension"] == "factuality"
+    details, scores = [], []
+    for detail, question_id, day in zip(
+        df.loc[is_factuality, "detail"],
+        df.loc[is_factuality, "question_id"],
+        df.loc[is_factuality, "response_date"],
+    ):
+        matched, total = count_essential_matches(
+            detail["matched_paragraphs"], day, slots.get(question_id, [])
+        )
+        details.append({**detail, "matched_slots": matched, "total_slots": total})
+        scores.append(matched / total if total else float("nan"))
+    df = df.copy()
+    df.loc[is_factuality, "detail"] = pd.Series(details, index=df.index[is_factuality])
+    df.loc[is_factuality, "score"] = scores
+    return df
+
+
+def factuality_band(matched: int, total: int) -> str:
+    # return the FACTUALITY_BANDS entry for matched of total essential
+    # paragraphs; counts rather than the float score, so 100% is exact
+    if matched == total:
+        return "correct"
+    if 2 * matched >= total:
+        return "mostly_correct"
+    if matched > 0:
+        return "partly_correct"
+    return "incorrect"
+
+
+def factuality_band_rows(df: pd.DataFrame) -> pd.DataFrame:
+    # return four 0/1 rows per factuality row, one per band, scoring 1 for the
+    # response's band, so a band's mean is the share of responses in it
+    df = filter_by_dimension("factuality", df)
+    bands = [
+        factuality_band(detail["matched_slots"], detail["total_slots"])
+        for detail in df["detail"]
+    ]
+    return pd.concat(
+        [
+            df.assign(
+                dimension=band,
+                score=[float(b == band) for b in bands],
+            )
+            for band in FACTUALITY_BANDS
+        ],
+        ignore_index=True,
+    )
+
+
 def load_all_scores(
     start: datetime.date = S1_START, end: datetime.date = S1_END
 ) -> pd.DataFrame:
-    # return the daily scores with the direct-reply labels and URL quality added
-    # as extra dimensions, and every row given the start of its response (NaN where
-    # there's no direct-reply data)
-    df_all_scores = pd.DataFrame(MarkingSchemeService().get_daily_scores(start, end))
+    # return the daily scores (factuality rescored by rescore_factuality) with
+    # the direct-reply labels and URL quality added as extra dimensions, and
+    # every row given the start of its response (NaN where there's no
+    # direct-reply data)
+    df_all_scores = rescore_factuality(
+        pd.DataFrame(MarkingSchemeService().get_daily_scores(start, end))
+    )
     df_replies = load_direct_replies()
     keys = ["question_id", "model", "response_date"]
     starts = df_replies[keys + ["start"]].drop_duplicates(keys)

@@ -26,6 +26,8 @@ from explorer.factuality_viewer import (
     load_all_scores,
     load_questions,
     load_url_details,
+    FACTUALITY_BANDS,
+    factuality_band_rows,
     order_dimensions,
     question_table,
     response_rows,
@@ -112,7 +114,7 @@ async def get_summary(
     tag: str | None = None,
 ) -> dict:
     # per-dimension summary for one model, question and/or question tag
-    # (omitted = all)
+    # (omitted = all), plus the factuality correctness bands in band order
     df: pd.DataFrame = state.df
     if model:
         df = filter_by_model(model, df)
@@ -125,6 +127,10 @@ async def get_summary(
         "question_id": question_id,
         "tag": tag,
         "dimensions": summarise_dimensions(df),
+        "factuality_bands": sorted(
+            summarise_dimensions(factuality_band_rows(df)),
+            key=lambda d: FACTUALITY_BANDS.index(d["dimension"]),
+        ),
     }
 
 

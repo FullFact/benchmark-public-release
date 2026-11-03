@@ -140,6 +140,27 @@
       padding: 2px 4px;
     }
 
+    td.dim .band-toggle {
+      margin-left: 6px;
+      padding: 0 4px;
+      border: none;
+      background: none;
+      color: var(--black);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    td.dim .band-toggle:hover,
+    td.dim .band-toggle:focus-visible {
+      background: var(--cyan);
+    }
+
+    tr.band-row td.dim {
+      padding-left: 2em;
+      font-size: 0.85rem;
+      color: #404040;
+    }
+
     .group-start {
       border-left: 2px solid var(--black);
     }
@@ -214,6 +235,11 @@
     const statusDiv = document.getElementById("status");
     const questions = {};
     let dimensions = [];
+    // the factuality correctness bands, shown as sub-rows of factuality when
+    // expanded
+    let showBands = false;
+    let shownModels = [];
+    let summaries = [];
 
     // score range per dimension for the heat map; others are 0-1
     const DIMENSION_RANGES = { polarity: [-1, 1], url_quality: [-1, 3] };
@@ -264,8 +290,13 @@
       if (questionSelect.value) params.set("question_id", questionSelect.value);
       const response = await fetch(`/api/summary?${params}`);
       const data = await response.json();
-      // index by dimension for lookup when building rows
-      return Object.fromEntries(data.dimensions.map(d => [d.dimension, d]));
+      // index by dimension (bands included) for lookup when building rows
+      return {
+        bands: data.factuality_bands.map(d => d.dimension),
+        byDimension: Object.fromEntries(
+          [...data.dimensions, ...data.factuality_bands].map(d => [d.dimension, d])
+        ),
+      };
     }
 
     function saveState() {
@@ -277,6 +308,7 @@
       }
       if (tagSelect.value) params.set("tag", tagSelect.value);
       if (questionSelect.value) params.set("question_id", questionSelect.value);
+      if (showBands) params.set("bands", "1");
       const query = params.toString();
       history.replaceState(null, "", query ? `?${query}` : location.pathname);
     }
@@ -284,6 +316,7 @@
     function restoreState(models, tagList) {
       // start from the selection in the URL; unknown values are ignored
       const query = new URLSearchParams(location.search);
+      showBands = query.get("bands") === "1";
       const urlModels = query.getAll("models")
         .filter(m => m === ALL || models.includes(m))
         .slice(0, modelSelects.length);
@@ -304,8 +337,48 @@
       saveState();
       const models = modelSelects.map(s => s.value).filter(v => v !== NONE);
       statusDiv.textContent = "Loading…";
-      const summaries = await Promise.all(models.map(fetchSummary));
+      summaries = await Promise.all(models.map(fetchSummary));
+      shownModels = models;
+      renderTable();
+    }
 
+    function addRow(dim, label, className) {
+      const row = summaryBody.insertRow();
+      if (className) row.className = className;
+      const labelCell = addCell(row, "td", label, "dim");
+      for (const summary of summaries) {
+        const d = summary.byDimension[dim] || {};
+        for (const [value, digits, cellClass] of [
+          [d.mean, 3, "mean group-start"],
+          [d.min, 2, "range"],
+          [d.max, 2, "range"],
+        ]) {
+          const cell = addCell(row, "td", fmt(value, digits), cellClass);
+          cell.style.background = heatColour(dim, value);
+        }
+      }
+      return labelCell;
+    }
+
+    function addBandToggle(cell) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "band-toggle";
+      button.textContent = showBands ? "▾" : "▸";
+      button.setAttribute("aria-expanded", String(showBands));
+      button.setAttribute("aria-label", `${showBands ? "Hide" : "Show"} correctness bands`);
+      button.title = "Correct / mostly / partly / incorrect";
+      button.addEventListener("click", () => {
+        showBands = !showBands;
+        saveState();
+        renderTable();
+        summaryBody.querySelector(".band-toggle").focus();
+      });
+      cell.appendChild(button);
+    }
+
+    function renderTable() {
+      const models = shownModels;
       head.replaceChildren();
       const modelsRow = head.insertRow();
       modelsRow.className = "models-row";
@@ -322,22 +395,15 @@
       }
 
       // only dimensions with a score for at least one selected model
-      const shown = dimensions.filter(dim => summaries.some(s => s[dim]));
+      const shown = dimensions.filter(dim => summaries.some(s => s.byDimension[dim]));
+      const bands = summaries.length ? summaries[0].bands : [];
       summaryBody.replaceChildren();
       for (const dim of shown) {
-        const row = summaryBody.insertRow();
-        addCell(row, "td", dim, "dim");
-        for (const summary of summaries) {
-          const d = summary[dim] || {};
-          for (const [value, digits, className] of [
-            [d.mean, 3, "mean group-start"],
-            [d.min, 2, "range"],
-            [d.max, 2, "range"],
-          ]) {
-            const cell = addCell(row, "td", fmt(value, digits), className);
-            cell.style.background = heatColour(dim, value);
-          }
-        }
+        const labelCell = addRow(dim, dim);
+        if (dim !== "factuality" || !bands.length) continue;
+        addBandToggle(labelCell);
+        if (!showBands) continue;
+        for (const band of bands) addRow(band, band.replace("_", " "), "band-row");
       }
       statusDiv.textContent = shown.length ? "" : "No scores for this selection.";
     }

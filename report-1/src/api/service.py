@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_DB_PATH = str(
     Path(__file__).resolve().parents[2]
     / "data"
-    / "benchmark-2026-07-13-to-2026-09-22-filtered.sqlite"
+    / "benchmark-2026-07-13-to-2026-09-22.sqlite"
 )
 
 # The export uses its own labels for paragraph annotations.
@@ -292,6 +292,64 @@ class MarkingSchemeService:
         """Return the scores stored during this run."""
         return self.store.scores
 
+    def get_daily_scores(
+        self, date_from: date | None = None, date_to: date | None = None
+    ) -> list[dict]:
+        """Return every row of the exported daily_scores table, optionally
+        restricted to response dates in [date_from, date_to] inclusive. Each row
+        includes the question text, and its detail JSON is decoded."""
+        rows = self.store.conn.execute(
+            "SELECT s.*, q.text AS question FROM daily_scores s "
+            "JOIN questions q ON q.id = s.question_id "
+            "WHERE s.response_date >= ? AND s.response_date <= ? "
+            "ORDER BY s.response_date, s.question_id, s.model, s.dimension",
+            (
+                (date_from or date.min).isoformat(),
+                (date_to or date.max).isoformat(),
+            ),
+        )
+        return [
+            {
+                **dict(row),
+                "detail": json.loads(row["detail"]) if row["detail"] else None,
+            }
+            for row in rows
+        ]
+
+    def get_essential_paragraphs(self) -> list[dict]:
+        """Return every essential marking-scheme paragraph, with the dates
+        (inclusive, None if open-ended) between which it applies."""
+        rows = self.store.conn.execute(
+            "SELECT id, question_id, applies_from, applies_to, description "
+            "FROM paragraphs WHERE annotation = 'essential' "
+            "ORDER BY question_id, sort_order"
+        )
+        return [dict(row) for row in rows]
+
+    def get_url_ratings(
+        self, date_from: date | None = None, date_to: date | None = None
+    ) -> list[dict]:
+        """Return one row per rated URL cited in a response, optionally
+        restricted to response dates in [date_from, date_to] inclusive. A URL's
+        rating (primary, good, OK or poor) comes from url_annotations, matched
+        on the response's question and the exact URL."""
+        rows = self.store.conn.execute(
+            "SELECT r.id AS response_id, r.question_id, q.text AS question, "
+            "r.model, r.response_date, u.netloc, u.url, a.rating "
+            "FROM response_urls u "
+            "JOIN responses r ON r.id = u.response_id "
+            "JOIN questions q ON q.id = r.question_id "
+            "JOIN url_annotations a ON a.question_id = r.question_id "
+            "AND a.scope = 'url' AND a.target = u.url "
+            "WHERE r.response_date >= ? AND r.response_date <= ? "
+            "ORDER BY r.response_date, r.question_id, r.model, u.id",
+            (
+                (date_from or date.min).isoformat(),
+                (date_to or date.max).isoformat(),
+            ),
+        )
+        return [dict(row) for row in rows]
+
     def close(self) -> None:
         """In production, this releases the database connection between
         pipeline stages. Nothing to do here."""
@@ -306,15 +364,17 @@ class PolygraphResponseService:
         self.store = _get_store()
 
     def get_all_questions(self) -> list[dict]:
-        """Return every benchmark question, as {"question": text, "tags": [...]}."""
+        """Return every benchmark question, as
+        {"id": question_id, "question": text, "tags": [...]}."""
         rows = self.store.conn.execute(
-            "SELECT q.text, GROUP_CONCAT(t.name) AS tags FROM questions q "
+            "SELECT q.id, q.text, GROUP_CONCAT(t.name) AS tags FROM questions q "
             "LEFT JOIN question_tags qt ON qt.question_id = q.id "
             "LEFT JOIN tags t ON t.id = qt.tag_id "
             "GROUP BY q.id ORDER BY q.id"
         )
         return [
             {
+                "id": row["id"],
                 "question": row["text"],
                 "tags": row["tags"].split(",") if row["tags"] else [],
             }
@@ -347,6 +407,7 @@ class PolygraphResponseService:
             "prompt": prompt,
             "response": row["response_text"],
             "model": row["model"],
+            "provider": row["provider"],
             "responded_at": _naive_utc(row["created_at"]).isoformat(),
             "created_at": _naive_utc(row["created_at"]).isoformat(),
         }
