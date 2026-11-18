@@ -140,7 +140,7 @@
       padding: 2px 4px;
     }
 
-    td.dim .band-toggle {
+    td.dim .sub-toggle {
       margin-left: 6px;
       padding: 0 4px;
       border: none;
@@ -150,12 +150,12 @@
       cursor: pointer;
     }
 
-    td.dim .band-toggle:hover,
-    td.dim .band-toggle:focus-visible {
+    td.dim .sub-toggle:hover,
+    td.dim .sub-toggle:focus-visible {
       background: var(--cyan);
     }
 
-    tr.band-row td.dim {
+    tr.sub-row td.dim {
       padding-left: 2em;
       font-size: 0.85rem;
       color: #404040;
@@ -235,14 +235,31 @@
     const statusDiv = document.getElementById("status");
     const questions = {};
     let dimensions = [];
-    // the factuality correctness bands, shown as sub-rows of factuality when
-    // expanded
-    let showBands = false;
+    // dimensions shown as sub-rows of another, only when that row is expanded;
+    // factuality's sub-rows are its correctness bands, from the summary
+    const SUB_DIMENSIONS = {
+      polarity: ["bipolar", "non_polar"],
+      falsehoods: ["false_misleading", "irrelevant_false"],
+      info_location: ["info_location_words"],
+    };
+    const SUB_DIMENSION_LABELS = {
+      factuality: "correctness bands",
+      polarity: "bipolar and non-polar",
+      falsehoods: "false or misleading, and irrelevant and false",
+      info_location: "the position in words",
+    };
+    // display names for sub-rows whose dimension name doesn't read well
+    const SUB_ROW_LABELS = {
+      false_misleading: "false or misleading",
+      irrelevant_false: "irrelevant and false",
+      info_location_words: "info location (words)",
+    };
+    const expanded = new Set();
     let shownModels = [];
     let summaries = [];
 
     // score range per dimension for the heat map; others are 0-1
-    const DIMENSION_RANGES = { polarity: [-1, 1], url_quality: [-1, 3] };
+    const DIMENSION_RANGES = { polarity: [-1, 1], url_quality: [-1, 3], info_location_words: [0, 300] };
 
     // heat map colours at the minimum, middle and maximum of a dimension's range
     const HEAT_STOPS = [[150, 190, 240], [240, 240, 236], [250, 226, 105]];
@@ -308,7 +325,7 @@
       }
       if (tagSelect.value) params.set("tag", tagSelect.value);
       if (questionSelect.value) params.set("question_id", questionSelect.value);
-      if (showBands) params.set("bands", "1");
+      for (const parent of expanded) params.append("expand", parent);
       const query = params.toString();
       history.replaceState(null, "", query ? `?${query}` : location.pathname);
     }
@@ -316,7 +333,11 @@
     function restoreState(models, tagList) {
       // start from the selection in the URL; unknown values are ignored
       const query = new URLSearchParams(location.search);
-      showBands = query.get("bands") === "1";
+      for (const parent of query.getAll("expand")) {
+        if (parent in SUB_DIMENSION_LABELS) expanded.add(parent);
+      }
+      // older links used bands=1 for the factuality bands
+      if (query.get("bands") === "1") expanded.add("factuality");
       const urlModels = query.getAll("models")
         .filter(m => m === ALL || models.includes(m))
         .slice(0, modelSelects.length);
@@ -360,19 +381,28 @@
       return labelCell;
     }
 
-    function addBandToggle(cell) {
+    function subDimensions(parent) {
+      // the sub-rows for a dimension that have a score for some selected model
+      const subs = parent === "factuality"
+        ? (summaries.length ? summaries[0].bands : [])
+        : SUB_DIMENSIONS[parent] || [];
+      return subs.filter(dim => summaries.some(s => s.byDimension[dim]));
+    }
+
+    function addSubToggle(cell, parent) {
+      const open = expanded.has(parent);
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "band-toggle";
-      button.textContent = showBands ? "▾" : "▸";
-      button.setAttribute("aria-expanded", String(showBands));
-      button.setAttribute("aria-label", `${showBands ? "Hide" : "Show"} correctness bands`);
-      button.title = "Correct / mostly / partly / incorrect";
+      button.className = "sub-toggle";
+      button.dataset.parent = parent;
+      button.textContent = open ? "▾" : "▸";
+      button.setAttribute("aria-expanded", String(open));
+      button.setAttribute("aria-label", `${open ? "Hide" : "Show"} ${SUB_DIMENSION_LABELS[parent]}`);
       button.addEventListener("click", () => {
-        showBands = !showBands;
+        if (open) expanded.delete(parent); else expanded.add(parent);
         saveState();
         renderTable();
-        summaryBody.querySelector(".band-toggle").focus();
+        summaryBody.querySelector(`.sub-toggle[data-parent="${parent}"]`).focus();
       });
       cell.appendChild(button);
     }
@@ -394,16 +424,20 @@
         addCell(colsRow, "th", "max");
       }
 
-      // only dimensions with a score for at least one selected model
-      const shown = dimensions.filter(dim => summaries.some(s => s.byDimension[dim]));
-      const bands = summaries.length ? summaries[0].bands : [];
+      // only dimensions with a score for at least one selected model; sub-rows
+      // come under their parent instead
+      const children = new Set(Object.values(SUB_DIMENSIONS).flat());
+      const shown = dimensions.filter(
+        dim => !children.has(dim) && summaries.some(s => s.byDimension[dim])
+      );
       summaryBody.replaceChildren();
       for (const dim of shown) {
         const labelCell = addRow(dim, dim);
-        if (dim !== "factuality" || !bands.length) continue;
-        addBandToggle(labelCell);
-        if (!showBands) continue;
-        for (const band of bands) addRow(band, band.replace("_", " "), "band-row");
+        const subs = subDimensions(dim);
+        if (!subs.length) continue;
+        addSubToggle(labelCell, dim);
+        if (!expanded.has(dim)) continue;
+        for (const sub of subs) addRow(sub, SUB_ROW_LABELS[sub] || sub.replace("_", " "), "sub-row");
       }
       statusDiv.textContent = shown.length ? "" : "No scores for this selection.";
     }

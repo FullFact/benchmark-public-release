@@ -98,11 +98,22 @@
     <p>
       The original five dimensions are labelled <b>*</b> and are based on human annotation, as is the URL quality score.
       The others are predicted by a Gemma model's post hoc analysis of the first full sentence of each response.</p>
+    <p>
+      Note that some dimensions only make sense for certain questions. For example, polarity is only defined for
+      questions
+      with a clear yes/no answer, but will still have a value for other questions.
+    </p>
 
     <div class="example">Question used in examples below: How many cases were there?</div>
     <dl>
       <dt>Factuality*</dt>
-      <dd>Proportion of "essential" paragraphs in the marking scheme found in the response.</dd>
+      <dd>Proportion of "essential" paragraphs in the marking scheme found in the response.
+        <p><i>Bands</i>: the factuality dimension can be expanded to show the proportion of answers that
+          are completely correct (containing atoms linked to all essential paragraphs); mostly correct
+          (atoms match 50-99% of essential paragraphs); partly correct (1-49%) and incorrect
+          (0% of essential paragraphs have at least one associated atom).
+        </p>
+      </dd>
       <dt>Certainty</dt>
       <dd>How certain is the chatbot that the claim is true?
         <div class="example">High: It was about 1000 cases.</div>
@@ -123,18 +134,38 @@
         <div class="example">Yes (1): It was 1000 cases.</div>
         <div class="example">No (-1): It was not 1000 cases.</div>
       </dd>
+      <p><i>The polarity view can be expanded to reveal the bipolar and non-polar dimensions, defined here:</i></p>
       <dt>Bipolar</dt>
       <dd>Is the answer both 'yes' and 'no'?
         <div class="example">Bipolar (1): It was 1000 cases but it later fell.</div>
         <div class="example">Not bipolar (0): It was 1000 cases.</div>
       </dd>
-      <dt>Non Polar</dt>
-      <dd>Neither agrees with nor disagrees with the question.</dd>
+      <dt>Non-Polar</dt>
+      <dd>Neither agrees with nor disagrees with the question.
+        <div class="example">Non-polar (1): It was 1000 cases but then it wasn't.</div>
+
+      </dd>
       <dt>Consistency*</dt>
       <dd>What proportion of the atoms are the same over time in response to this question?</dd>
       <dt>URL quality</dt>
       <dd>Mean quality rating of the URLs cited in the response.
         <div class="example">Primary 3, good 2, OK 1, poor −1.</div>
+      </dd>
+      <dt>Falsehoods</dt>
+      <dd>How many of the response's claims contain atoms that are false or misleading?
+        <div class="example">False or misleading: There were no cases.</div>
+        <div class="example">Irrelevant and false: The moon is made of cheese.</div>
+      </dd>
+      <dt>Info location</dt>
+      <dd>How far into the response the last piece of essential information appears, as a
+        fraction of the response's length. 0 means the essential information is all at the
+        very start; 1 means the reader had to read to the end to get it all.
+        <div class="example">0.1: There were 1000 cases. The outbreak began in May and …</div>
+        <div class="example">0.9: The outbreak began in May and … so there were 1000 cases.</div>
+        <p><i>Words</i>: the info location dimension can be expanded to show the same figure as a
+          raw word count rather than a fraction. Responses in which no essential information was
+          found are not counted in either.
+        </p>
       </dd>
       <dt>Civic responsibility*</dt>
       <dd>For questions tagged "civics", how factual is the response?</dd>

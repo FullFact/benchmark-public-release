@@ -29,6 +29,23 @@ DIRECT_REPLY_VALUES = {
 URL_RATING_VALUES = {"primary": 3, "good": 2, "OK": 1, "poor": -1}
 URL_QUALITY = "url_quality"
 
+# 0/1 dimensions for false content: whether a response has any atom in a
+# harmful ("false or misleading") or harmful_irrelevant ("irrelevant and
+# false/misleading") paragraph, and falsehoods if it has either
+FALSEHOOD_DIMENSIONS = {
+    "false_misleading": "harmful",
+    "irrelevant_false": "harmful_irrelevant",
+}
+FALSEHOODS = "falsehoods"
+
+ATOM_OFFSETS_PATH = (
+    Path(__file__).resolve().parents[2] / "data" / "atom_offsets.csv"
+)
+# how far into the response its last essential atom appears: as a fraction of
+# the response's length, and as a raw word count
+INFO_LOCATION = "info_location"
+INFO_LOCATION_WORDS = "info_location_words"
+
 # essential paragraphs that are versions of the same point over time (e.g. who
 # the PM is), by question; each group counts as one essential paragraph, and
 # only a member whose dates include the response date earns credit
@@ -50,6 +67,10 @@ DIMENSION_ORDER = [
     "non_polar",
     "consistency",
     URL_QUALITY,
+    FALSEHOODS,
+    *FALSEHOOD_DIMENSIONS,
+    INFO_LOCATION,
+    INFO_LOCATION_WORDS,
 ]
 
 YES_NO_QUESTIONS = [2, 15, 18, 48, 54, 84, 101]
@@ -101,6 +122,62 @@ def load_url_ratings(
     )
     df["dimension"] = URL_QUALITY
     return df
+
+
+def load_falsehoods(
+    start: datetime.date = S1_START, end: datetime.date = S1_END
+) -> pd.DataFrame:
+    # return three 0/1 rows per response, in the same shape as the daily
+    # scores: one per FALSEHOOD_DIMENSIONS entry, and falsehoods for either
+    df = pd.DataFrame(MarkingSchemeService().get_falsehood_flags(start, end))
+    keys = ["response_date", "question_id", "model", "question"]
+    flags = {
+        dimension: df[column].astype(float)
+        for dimension, column in FALSEHOOD_DIMENSIONS.items()
+    }
+    # NaN (atoms never extracted) stays NaN
+    flags[FALSEHOODS] = pd.concat(flags.values(), axis=1).max(axis=1, skipna=False)
+    return pd.concat(
+        [
+            df[keys].assign(dimension=dimension, score=score)
+            for dimension, score in flags.items()
+        ],
+        ignore_index=True,
+    )
+
+
+def load_info_location(
+    path: Path = ATOM_OFFSETS_PATH,
+    start: datetime.date = S1_START,
+    end: datetime.date = S1_END,
+) -> pd.DataFrame:
+    # return two rows per response with a located essential atom, in the same
+    # shape as the daily scores: the word offset of its last essential atom, as
+    # a fraction of the response's length and as a raw word count. Responses
+    # with no essential atom located are left out rather than scored 0
+    offsets = pd.read_csv(path)
+    offsets = offsets[offsets["word_offset"] >= 0]
+    essential = pd.DataFrame(MarkingSchemeService().get_essential_atoms(start, end))
+    df = offsets.merge(essential, on=["atom_id", "response_id"], how="inner")
+    keys = ["response_date", "question_id", "model", "question"]
+    last = df.groupby(keys).agg(
+        # the response's length is the same on each of its rows
+        word_offset=("word_offset", "max"),
+        response_words=("response_words", "first"),
+    )
+    scores = {
+        INFO_LOCATION: last["word_offset"].div(
+            last["response_words"].where(last["response_words"] > 0)
+        ),
+        INFO_LOCATION_WORDS: last["word_offset"].astype(float),
+    }
+    return pd.concat(
+        [
+            last.reset_index()[keys].assign(dimension=dimension, score=score.to_numpy())
+            for dimension, score in scores.items()
+        ],
+        ignore_index=True,
+    )
 
 
 def response_rows(
@@ -176,11 +253,12 @@ def question_table(
     # "values"}]}, with every question that has scores (None where there's no
     # data). Given a dimension, there's one column per model, after an "All
     # models" column; otherwise one column per dimension, for the model (or all
-    # models if None)
+    # models if None), including the factuality bands
     question_ids = sorted(set(df["question_id"]))
     if dimension is None:
         if model is not None:
             df = filter_by_model(model, df)
+        df = pd.concat([df, factuality_band_rows(df)], ignore_index=True)
         table = df.pivot_table(
             index="question_id", columns="dimension", values="score", aggfunc="mean"
         )
@@ -333,9 +411,9 @@ def load_all_scores(
     start: datetime.date = S1_START, end: datetime.date = S1_END
 ) -> pd.DataFrame:
     # return the daily scores (factuality rescored by rescore_factuality) with
-    # the direct-reply labels and URL quality added as extra dimensions, and
-    # every row given the start of its response (NaN where there's no
-    # direct-reply data)
+    # the direct-reply labels, URL quality, falsehoods and info location
+    # added as extra dimensions, and every row given the start of its response
+    # (NaN where there's no direct-reply data)
     df_all_scores = rescore_factuality(
         pd.DataFrame(MarkingSchemeService().get_daily_scores(start, end))
     )
@@ -347,6 +425,8 @@ def load_all_scores(
             df_all_scores,
             df_replies.drop(columns="start"),
             load_url_ratings(start, end),
+            load_falsehoods(start, end),
+            load_info_location(start=start, end=end),
         ],
         ignore_index=True,
     )

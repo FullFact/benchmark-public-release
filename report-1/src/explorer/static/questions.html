@@ -57,6 +57,19 @@
     td.question { font-weight: 400; }
     tbody tr { border-bottom: 1px solid var(--gray); }
     td.value { white-space: nowrap; }
+    th .sub-toggle {
+      margin-left: 4px;
+      padding: 0 4px;
+      border: none;
+      background: none;
+      color: var(--black);
+      font: inherit;
+      cursor: pointer;
+    }
+    th .sub-toggle:hover, th .sub-toggle:focus-visible { background: var(--cyan); }
+    /* sub-columns, shown when their parent column is expanded */
+    th.sub-col { font-weight: 400; font-size: 0.8rem; color: #404040; }
+    td.sub-col { font-size: 0.8rem; }
     .status { margin-top: 12px; color: var(--muted); }
     /* site navigation: identical on every page, top-left above the content */
     nav.site-nav { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 0 0 16px; font-size: 0.9rem; }
@@ -93,9 +106,32 @@
   const body = document.getElementById("body");
   const statusDiv = document.getElementById("status");
   let fetchId = 0;
+  let lastData = null;  // the last table loaded, to redraw on expand/collapse
+  let lastDimension = null;
+
+  // dimension columns shown after another, only when that column is expanded
+  const SUB_DIMENSIONS = {
+    factuality: ["correct", "mostly_correct", "partly_correct", "incorrect"],
+    polarity: ["bipolar", "non_polar"],
+    falsehoods: ["false_misleading", "irrelevant_false"],
+    info_location: ["info_location_words"],
+  };
+  const SUB_DIMENSION_LABELS = {
+    factuality: "correctness bands",
+    polarity: "bipolar and non-polar",
+    falsehoods: "false or misleading, and irrelevant and false",
+    info_location: "the position in words",
+  };
+  // display names for sub-columns whose dimension name doesn't read well
+  const SUB_COLUMN_LABELS = {
+    false_misleading: "false or misleading",
+    irrelevant_false: "irrelevant and false",
+    info_location_words: "info location (words)",
+  };
+  const expanded = new Set();
 
   // score range per dimension for the heat map; others are 0-1
-  const DIMENSION_RANGES = { polarity: [-1, 1], url_quality: [-1, 3] };
+  const DIMENSION_RANGES = { polarity: [-1, 1], url_quality: [-1, 3], info_location_words: [0, 300] };
 
   // heat map colours at the minimum, middle and maximum of a dimension's range
   const HEAT_STOPS = [[150, 190, 240], [240, 240, 236], [250, 226, 105]];
@@ -135,8 +171,10 @@
   function saveState() {
     // keep the selection in the URL so a view can be bookmarked or shared
     const [kind, name] = selection();
-    const params = new URLSearchParams({ [kind]: name });
-    history.replaceState(null, "", kind === "model" && name === ALL ? location.pathname : `?${params}`);
+    const params = kind === "model" && name === ALL ? new URLSearchParams() : new URLSearchParams({ [kind]: name });
+    for (const parent of expanded) params.append("expand", parent);
+    const query = params.toString();
+    history.replaceState(null, "", query ? `?${query}` : location.pathname);
   }
 
   async function loadTable() {
@@ -157,22 +195,70 @@
     }
   }
 
+  function addSubToggle(cell, parent) {
+    const open = expanded.has(parent);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "sub-toggle";
+    button.dataset.parent = parent;
+    button.textContent = open ? "▾" : "▸";
+    button.setAttribute("aria-expanded", String(open));
+    button.setAttribute("aria-label", `${open ? "Hide" : "Show"} ${SUB_DIMENSION_LABELS[parent]}`);
+    button.addEventListener("click", () => {
+      if (open) expanded.delete(parent); else expanded.add(parent);
+      saveState();
+      render(lastData, lastDimension);
+      head.querySelector(`.sub-toggle[data-parent="${parent}"]`).focus();
+    });
+    cell.appendChild(button);
+  }
+
+  function visibleColumns(data, dimension) {
+    // [index, label, className] for each column to show: with a dimension
+    // selected the columns are models, all shown; otherwise sub-dimension
+    // columns follow their parent, and only when it's expanded
+    const indexed = data.columns.map((column, i) => [i, column, ""]);
+    if (dimension) return indexed;
+    const children = new Set(Object.values(SUB_DIMENSIONS).flat());
+    const shown = [];
+    for (const [i, column] of indexed) {
+      if (children.has(column)) continue;
+      shown.push([i, column, ""]);
+      if (!expanded.has(column)) continue;
+      for (const sub of SUB_DIMENSIONS[column] || []) {
+        const j = data.columns.indexOf(sub);
+        if (j >= 0) shown.push([j, SUB_COLUMN_LABELS[sub] || sub.replace("_", " "), "sub-col"]);
+      }
+    }
+    return shown;
+  }
+
   function render(data, dimension) {
+    lastData = data;
+    lastDimension = dimension;
+    const columns = visibleColumns(data, dimension);
     head.replaceChildren();
     const headRow = head.insertRow();
     addCell(headRow, "th", "Question", "question");
-    for (const column of data.columns) addCell(headRow, "th", column);
+    for (const [, label, className] of columns) {
+      const th = addCell(headRow, "th", label, className);
+      // a toggle on a parent column that has sub-columns in this table
+      if (!dimension && (SUB_DIMENSIONS[label] || []).some(sub => data.columns.includes(sub))) {
+        addSubToggle(th, label);
+      }
+    }
 
     body.replaceChildren();
     for (const row of data.rows) {
       const tr = body.insertRow();
       const cell = addCell(tr, "td", `[${row.question_id}] ${row.question}`, "question");
       if (row.tags.length) cell.title = `Tags: ${row.tags.join(", ")}`;
-      row.values.forEach((value, i) => {
-        const td = addCell(tr, "td", value === null ? "–" : value.toFixed(2), "value");
+      for (const [i, , className] of columns) {
+        const value = row.values[i];
+        const td = addCell(tr, "td", value === null ? "–" : value.toFixed(2), `value ${className}`.trim());
         // a dimension's range sets the colour scale: the selected one, or the column's
         td.style.background = heatColour(dimension || data.columns[i], value);
-      });
+      }
     }
     statusDiv.textContent = data.columns.length ? "" : "No scores for this selection.";
   }
@@ -193,6 +279,9 @@
 
     // start from the selection in the URL, else all models
     const query = new URLSearchParams(location.search);
+    for (const parent of query.getAll("expand")) {
+      if (parent in SUB_DIMENSIONS) expanded.add(parent);
+    }
     const wanted = query.has("dimension") ? `dimension:${query.get("dimension")}` : `model:${query.get("model") || ALL}`;
     showSelect.value = wanted;
     if (showSelect.selectedIndex < 0) showSelect.value = `model:${ALL}`;

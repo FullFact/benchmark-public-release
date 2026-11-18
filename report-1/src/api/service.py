@@ -326,6 +326,82 @@ class MarkingSchemeService:
         )
         return [dict(row) for row in rows]
 
+    def get_falsehood_flags(
+        self, date_from: date | None = None, date_to: date | None = None
+    ) -> list[dict]:
+        """Return one row per response, optionally restricted to response dates
+        in [date_from, date_to] inclusive, with 0/1 flags for whether any of its
+        atoms is in a harmful (false or misleading) or harmful_irrelevant
+        paragraph. As in the auto-marker, an atom's paragraphs are its own, or
+        if it has none, those of the atom it repeats. Flags are None for a
+        response whose atoms were never extracted."""
+        rows = self.store.conn.execute(
+            "WITH atom_paragraphs AS ("
+            "  SELECT a.response_id, COALESCE(own.paragraph_id, parent.paragraph_id)"
+            "  AS paragraph_id FROM atoms a"
+            "  LEFT JOIN paragraph_atoms own ON own.atom_id = a.id"
+            "  LEFT JOIN paragraph_atoms parent ON own.atom_id IS NULL"
+            "  AND parent.atom_id = a.repeat_of"
+            "  WHERE a.response_id IS NOT NULL"
+            "), labels AS ("
+            "  SELECT ap.response_id, p.annotation FROM atom_paragraphs ap"
+            "  JOIN paragraphs p ON p.id = ap.paragraph_id"
+            "  WHERE p.annotation IN ('harmful', 'harmful_irrelevant')"
+            ") "
+            "SELECT r.id AS response_id, r.question_id, q.text AS question, r.model, "
+            "r.response_date, r.atoms_extracted_at IS NOT NULL AS extracted, "
+            "EXISTS (SELECT 1 FROM labels l WHERE l.response_id = r.id "
+            "AND l.annotation = 'harmful') AS harmful, "
+            "EXISTS (SELECT 1 FROM labels l WHERE l.response_id = r.id "
+            "AND l.annotation = 'harmful_irrelevant') AS harmful_irrelevant "
+            "FROM responses r JOIN questions q ON q.id = r.question_id "
+            "WHERE r.response_date >= ? AND r.response_date <= ? "
+            "ORDER BY r.response_date, r.question_id, r.model",
+            (
+                (date_from or date.min).isoformat(),
+                (date_to or date.max).isoformat(),
+            ),
+        )
+        return [
+            {
+                **{k: row[k] for k in ("response_id", "question_id", "question",
+                                       "model", "response_date")},
+                "harmful": row["harmful"] if row["extracted"] else None,
+                "harmful_irrelevant": (
+                    row["harmful_irrelevant"] if row["extracted"] else None
+                ),
+            }
+            for row in rows
+        ]
+
+    def get_essential_atoms(
+        self, date_from: date | None = None, date_to: date | None = None
+    ) -> list[dict]:
+        """Return one row per atom in an essential paragraph, optionally
+        restricted to response dates in [date_from, date_to] inclusive, with
+        the response it came from. As in the auto-marker, an atom's paragraphs
+        are its own, or if it has none, those of the atom it repeats."""
+        rows = self.store.conn.execute(
+            "SELECT DISTINCT a.id AS atom_id, r.id AS response_id, "
+            "r.question_id, q.text AS question, r.model, r.response_date "
+            "FROM atoms a "
+            "JOIN responses r ON r.id = a.response_id "
+            "JOIN questions q ON q.id = r.question_id "
+            "LEFT JOIN paragraph_atoms own ON own.atom_id = a.id "
+            "LEFT JOIN paragraph_atoms parent ON own.atom_id IS NULL "
+            "AND parent.atom_id = a.repeat_of "
+            "JOIN paragraphs p "
+            "ON p.id = COALESCE(own.paragraph_id, parent.paragraph_id) "
+            "WHERE p.annotation = 'essential' "
+            "AND r.response_date >= ? AND r.response_date <= ? "
+            "ORDER BY r.response_date, r.question_id, r.model, a.id",
+            (
+                (date_from or date.min).isoformat(),
+                (date_to or date.max).isoformat(),
+            ),
+        )
+        return [dict(row) for row in rows]
+
     def get_url_ratings(
         self, date_from: date | None = None, date_to: date | None = None
     ) -> list[dict]:
