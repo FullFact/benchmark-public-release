@@ -1,4 +1,5 @@
 import datetime
+import sqlite3
 from pathlib import Path
 
 import pandas as pd
@@ -8,9 +9,11 @@ from api.service import MarkingSchemeService, PolygraphResponseService
 S1_START = datetime.date(2026, 7, 13)
 S1_END = datetime.date(2026, 9, 22)
 
-DIRECT_REPLIES_PATH = (
-    Path(__file__).resolve().parents[2] / "data" / "s1_direct_replies.csv"
+MISSING_ANALYSIS = (
+    "The response_analysis table is missing or empty. Build it with "
+    "`uv run python src/explorer/import_analysis.py`."
 )
+
 # direct-reply labels, used as extra score dimensions, with the numeric score
 # for each label value
 DIRECT_REPLY_VALUES = {
@@ -38,9 +41,7 @@ FALSEHOOD_DIMENSIONS = {
 }
 FALSEHOODS = "falsehoods"
 
-ATOM_OFFSETS_PATH = (
-    Path(__file__).resolve().parents[2] / "data" / "atom_offsets.csv"
-)
+ATOM_OFFSETS_PATH = Path(__file__).resolve().parents[2] / "data" / "atom_offsets.csv"
 # how far into the response its last essential atom appears: as a fraction of
 # the response's length, and as a raw word count
 INFO_LOCATION = "info_location"
@@ -84,16 +85,24 @@ def order_dimensions(dimensions: set[str]) -> list[str]:
     return known + sorted(dimensions - set(DIMENSION_ORDER))
 
 
-def load_direct_replies(path: Path = DIRECT_REPLIES_PATH) -> pd.DataFrame:
+def load_direct_replies() -> pd.DataFrame:
     # return one row per (question, model, date, direct-reply label) in the
     # same shape as the daily scores, with the label as the dimension, plus the
-    # start of the response
-    df = pd.read_csv(path)
+    # start of the response. The labels come from the response_analysis table,
+    # which src/explorer/import_analysis.py builds from the external analysis
+    # CSV, so that has to have been run at least once
+    try:
+        rows = MarkingSchemeService().get_response_analysis()
+    except sqlite3.OperationalError as error:  # no such table
+        raise RuntimeError(MISSING_ANALYSIS) from error
+    if not rows:
+        raise RuntimeError(MISSING_ANALYSIS)
+    df = pd.DataFrame(rows)
     df["non_polar"] = df["polarity"]
     df["bipolar"] = df["polarity"]
     for label, values in DIRECT_REPLY_VALUES.items():
         df[label] = df[label].map(values)
-    return df.rename(columns={"date": "response_date"}).melt(
+    return df.melt(
         id_vars=["response_date", "question_id", "model", "question", "start"],
         value_vars=list(DIRECT_REPLY_VALUES),
         var_name="dimension",

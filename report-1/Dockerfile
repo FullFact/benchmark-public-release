@@ -6,6 +6,6 @@ WORKDIR /app
 COPY src/explorer/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ src/
-COPY data/benchmark-2026-07-13-to-2026-09-22.sqlite data/s1_direct_replies.csv data/atom_offsets.csv data/
+COPY data/benchmark-2026-07-13-to-2026-09-22.sqlite data/atom_offsets.csv data/
 ENV PYTHONPATH=/app/src PYTHONUNBUFFERED=1
 CMD exec uvicorn explorer.app:app --host 0.0.0.0 --port ${PORT:-8080}

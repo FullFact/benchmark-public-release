@@ -426,6 +426,31 @@ class MarkingSchemeService:
         )
         return [dict(row) for row in rows]
 
+    def get_response_analysis(
+        self, date_from: date | None = None, date_to: date | None = None
+    ) -> list[dict]:
+        """Return one row per analysed response, optionally restricted to
+        response dates in [date_from, date_to] inclusive, with the direct-reply
+        labels and the opening of the response. The response_analysis table is
+        built by src/explorer/import_analysis.py from the external analysis
+        CSV; it is empty, or absent, until that has been run."""
+        rows = self.store.conn.execute(
+            "SELECT r.response_date, r.question_id, q.text AS question, "
+            "r.model, a.start, a.polarity, a.certainty, a.precision, "
+            "a.directness, a.temporal, a.geographic, a.definitional, "
+            "a.attributional "
+            "FROM response_analysis a "
+            "JOIN responses r ON r.id = a.response_id "
+            "JOIN questions q ON q.id = r.question_id "
+            "WHERE r.response_date >= ? AND r.response_date <= ? "
+            "ORDER BY r.response_date, r.question_id, r.model",
+            (
+                (date_from or date.min).isoformat(),
+                (date_to or date.max).isoformat(),
+            ),
+        )
+        return [dict(row) for row in rows]
+
     def close(self) -> None:
         """In production, this releases the database connection between
         pipeline stages. Nothing to do here."""
